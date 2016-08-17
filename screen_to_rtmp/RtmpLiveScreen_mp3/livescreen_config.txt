@@ -1,0 +1,13 @@
+bitrate = 100
+is_auto_publish = 1
+is_cap_screen = 1
+is_capure_webcam = 0
+is_need_record = 0
+rtmpurl = rtmp://192.168.1.81:1935/live/aaaa
+video_change_millsecs = 4000
+wait_time = 0
+webcam_bitrate = 80
+webcam_height = 288
+webcam_width = 352
+webcam_x = 10
+webcam_y = 15

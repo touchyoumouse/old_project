@@ -1,0 +1,43 @@
+<html>
+<body>
+<pre>
+<h1>Build Log</h1>
+<h3>
+--------------------Configuration: 112 - Win32 Release--------------------
+</h3>
+<h3>Command Lines</h3>
+Creating command line "rc.exe /l 0x804 /fo"Release/112.res" /d "NDEBUG" /d "_AFXDLL" "J:\office 开发专题\vc 调用 vb 写的com（马汉德）\112\112.rc"" 
+Creating temporary file "C:\DOCUME~1\ADMINI~1\LOCALS~1\Temp\RSP186.tmp" with contents
+[
+/nologo /MD /W3 /GX /O2 /D "WIN32" /D "NDEBUG" /D "_WINDOWS" /D "_AFXDLL" /D "_MBCS" /FR"Release/" /Fp"Release/112.pch" /Yu"stdafx.h" /Fo"Release/" /Fd"Release/" /FD /c 
+"J:\office 开发专题\vc 调用 vb 写的com（马汉德）\112\112.cpp"
+"J:\office 开发专题\vc 调用 vb 写的com（马汉德）\112\pptcount.cpp"
+]
+Creating command line "cl.exe @C:\DOCUME~1\ADMINI~1\LOCALS~1\Temp\RSP186.tmp" 
+Creating temporary file "C:\DOCUME~1\ADMINI~1\LOCALS~1\Temp\RSP187.tmp" with contents
+[
+/nologo /MD /W3 /GX /O2 /D "WIN32" /D "NDEBUG" /D "_WINDOWS" /D "_AFXDLL" /D "_MBCS" /FR"Release/" /Fp"Release/112.pch" /Yc"stdafx.h" /Fo"Release/" /Fd"Release/" /FD /c 
+"J:\office 开发专题\vc 调用 vb 写的com（马汉德）\112\StdAfx.cpp"
+]
+Creating command line "cl.exe @C:\DOCUME~1\ADMINI~1\LOCALS~1\Temp\RSP187.tmp" 
+Creating command line "link.exe /nologo /subsystem:windows /incremental:no /pdb:"Release/112.pdb" /machine:I386 /out:"Release/112.exe"  ".\Release\112.obj" ".\Release\pptcount.obj" ".\Release\StdAfx.obj" ".\Release\112.res" "
+<h3>Output Window</h3>
+Compiling resources...
+Compiling...
+StdAfx.cpp
+Compiling...
+112.cpp
+pptcount.cpp
+Generating Code...
+Linking...
+Creating command line "bscmake.exe /nologo /o"Release/112.bsc"  ".\Release\StdAfx.sbr" ".\Release\112.sbr" ".\Release\pptcount.sbr""
+Creating browse info file...
+<h3>Output Window</h3>
+
+
+
+<h3>Results</h3>
+112.exe - 0 error(s), 0 warning(s)
+</pre>
+</body>
+</html>

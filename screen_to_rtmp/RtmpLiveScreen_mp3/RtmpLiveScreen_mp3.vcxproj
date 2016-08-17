@@ -1,0 +1,189 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|Win32">
+      <Configuration>Debug</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|Win32">
+      <Configuration>Release</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <ProjectGuid>{558DA45C-6EED-4440-8C12-3E24EC93806B}</ProjectGuid>
+    <RootNamespace>RtmpLiveScreen</RootNamespace>
+    <Keyword>MFCProj</Keyword>
+    <ProjectName>RtmpLiveScreen_mp3</ProjectName>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <CharacterSet>Unicode</CharacterSet>
+    <UseOfMfc>Static</UseOfMfc>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <CharacterSet>Unicode</CharacterSet>
+    <UseOfMfc>Static</UseOfMfc>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ImportGroup Label="ExtensionSettings">
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <PropertyGroup Label="UserMacros" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+    <LinkIncremental>true</LinkIncremental>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+    <LinkIncremental>false</LinkIncremental>
+  </PropertyGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+    <ClCompile>
+      <PrecompiledHeader>Use</PrecompiledHeader>
+      <WarningLevel>Level3</WarningLevel>
+      <Optimization>Disabled</Optimization>
+      <PreprocessorDefinitions>WIN32;_WINDOWS;_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>./</AdditionalIncludeDirectories>
+    </ClCompile>
+    <Link>
+      <SubSystem>Windows</SubSystem>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <AdditionalLibraryDirectories>./librtmp;./baseclasses;./libx264;./libfaac;./libmp3lame</AdditionalLibraryDirectories>
+      <AdditionalDependencies>strmiids.lib;strmbasd.lib;libx264d.lib;libfaacd.lib;librtmpd.lib;libmp3lamed.lib;libmpghipd.lib</AdditionalDependencies>
+    </Link>
+    <Midl>
+      <MkTypLibCompatible>false</MkTypLibCompatible>
+      <ValidateAllParameters>true</ValidateAllParameters>
+      <PreprocessorDefinitions>_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </Midl>
+    <ResourceCompile>
+      <Culture>0x0409</Culture>
+      <PreprocessorDefinitions>_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(IntDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ResourceCompile>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <PrecompiledHeader>Use</PrecompiledHeader>
+      <Optimization>Disabled</Optimization>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <PreprocessorDefinitions>WIN32;_WINDOWS;NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>./</AdditionalIncludeDirectories>
+    </ClCompile>
+    <Link>
+      <SubSystem>Windows</SubSystem>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <OptimizeReferences>true</OptimizeReferences>
+      <AdditionalLibraryDirectories>./librtmp;./baseclasses;./libx264;./libfaac;./libmp3lame</AdditionalLibraryDirectories>
+      <AdditionalDependencies>strmiids.lib;strmbase.lib;libx264.lib;libfaac.lib;libmp3lame.lib;libmpghip.lib;librtmp.lib</AdditionalDependencies>
+    </Link>
+    <Midl>
+      <MkTypLibCompatible>false</MkTypLibCompatible>
+      <ValidateAllParameters>true</ValidateAllParameters>
+      <PreprocessorDefinitions>NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </Midl>
+    <ResourceCompile>
+      <Culture>0x0409</Culture>
+      <PreprocessorDefinitions>NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(IntDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ResourceCompile>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <None Include="res\bg.bmp" />
+    <None Include="res\down.ico" />
+    <None Include="res\left.bmp" />
+    <None Include="res\left.ico" />
+    <None Include="res\right.ico" />
+    <None Include="res\RtmpLiveEncoder.ico" />
+    <None Include="res\RtmpLiveEncoder.rc2" />
+    <None Include="res\up.ico" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="AmfByteStream.h" />
+    <ClInclude Include="base\Base.h" />
+    <ClInclude Include="base\DataBuffer.h" />
+    <ClInclude Include="base\Lock.h" />
+    <ClInclude Include="base\SimpleThread.h" />
+    <ClInclude Include="BitWritter.h" />
+    <ClInclude Include="BtnST.h" />
+    <ClInclude Include="CpCount.h" />
+    <ClInclude Include="dshow\DSAudioCaptureDevice.h" />
+    <ClInclude Include="dshow\DSAudioGraph.h" />
+    <ClInclude Include="dshow\DSCapture.h" />
+    <ClInclude Include="dshow\DSCaptureDevice.h" />
+    <ClInclude Include="dshow\DSGrabberCallback.h" />
+    <ClInclude Include="dshow\DSGraph.h" />
+    <ClInclude Include="dshow\DSVideoCaptureDevice.h" />
+    <ClInclude Include="dshow\DSVideoGraph.h" />
+    <ClInclude Include="dshow\qedit.h" />
+    <ClInclude Include="encoder\AudioEncoderThread.h" />
+    <ClInclude Include="encoder\FAACEncoder.h" />
+    <ClInclude Include="encoder\MP3Encoder.h" />
+    <ClInclude Include="encoder\VideoEncoderThread.h" />
+    <ClInclude Include="encoder\X264Encoder.h" />
+    <ClInclude Include="FlvReader.h" />
+    <ClInclude Include="LibRtmp.h" />
+    <ClInclude Include="MySliderControl.h" />
+    <ClInclude Include="Resource.h" />
+    <ClInclude Include="RtmpLiveScreen.h" />
+    <ClInclude Include="RtmpLiveScreenApp.h" />
+    <ClInclude Include="RtmpLiveScreenCmd.h" />
+    <ClInclude Include="RtmpLiveScreenDlg.h" />
+    <ClInclude Include="SimpleConfig.h" />
+    <ClInclude Include="stdafx.h" />
+    <ClInclude Include="targetver.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="base\Lock.cpp" />
+    <ClCompile Include="base\SimpleThread.cpp" />
+    <ClCompile Include="BtnST.cpp" />
+    <ClCompile Include="dshow\DSAudioCaptureDevice.cpp" />
+    <ClCompile Include="dshow\DSAudioGraph.cpp" />
+    <ClCompile Include="dshow\DSCapture.cpp" />
+    <ClCompile Include="dshow\DSCaptureDevice.cpp" />
+    <ClCompile Include="dshow\DSGrabberCallback.cpp" />
+    <ClCompile Include="dshow\DSGraph.cpp" />
+    <ClCompile Include="dshow\DSVideoCaptureDevice.cpp" />
+    <ClCompile Include="dshow\DSVideoGraph.cpp" />
+    <ClCompile Include="encoder\AudioEncoderThread.cpp" />
+    <ClCompile Include="encoder\FAACEncoder.cpp" />
+    <ClCompile Include="encoder\MP3Encoder.cpp" />
+    <ClCompile Include="encoder\VideoEncoderThread.cpp" />
+    <ClCompile Include="encoder\X264Encoder.cpp" />
+    <ClCompile Include="FlvReader.cpp" />
+    <ClCompile Include="LibRtmp.cpp" />
+    <ClCompile Include="MySliderControl.cpp" />
+    <ClCompile Include="RtmpLiveScreen.cpp" />
+    <ClCompile Include="RtmpLiveScreenCmd.cpp" />
+    <ClCompile Include="RtmpLiveScreenrApp.cpp" />
+    <ClCompile Include="RtmpLiveScreenDlg.cpp" />
+    <ClCompile Include="SimpleConfig.cpp" />
+    <ClCompile Include="stdafx.cpp">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Create</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Create</PrecompiledHeader>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="RtmpLiveEncoder.rc" />
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <ImportGroup Label="ExtensionTargets">
+  </ImportGroup>
+  <ProjectExtensions>
+    <VisualStudio>
+      <UserProperties RESOURCE_FILE="RtmpLiveEncoder.rc" />
+    </VisualStudio>
+  </ProjectExtensions>
+</Project>

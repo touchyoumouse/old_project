@@ -1,0 +1,11 @@
+bitrate = 100
+is_cap_screen = 1
+is_capure_webcam = 1
+is_need_record = 0
+rtmpurl = rtmp://127.0.0.1/live/livestream
+video_change_millsecs = 4000
+webcam_bitrate = 80
+webcam_height = 480
+webcam_width = 640
+webcam_x = 0
+webcam_y = 0
