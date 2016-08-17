@@ -30,6 +30,8 @@ LibRtmp::LibRtmp(bool isNeedLog, bool isNeedRecord)
 
     streming_url_ = NULL;
     is_need_record_ = isNeedRecord;
+
+	control_rtmp_ = false;
 }
 
 LibRtmp::~LibRtmp()
@@ -48,6 +50,7 @@ LibRtmp::~LibRtmp()
 
 bool LibRtmp::Open(const char* url)
 {
+	
     streming_url_ = (char*)calloc(strlen(url)+1, sizeof(char));
     strcpy(streming_url_, url);
 
@@ -62,35 +65,46 @@ bool LibRtmp::Open(const char* url)
     AVal pageUrl = AVC("pageUrl");
     AVal pageUrl_arg = AVC("http://localhost/librtmp.html");
     //RTMP_SetOpt(rtmp_, &flashver, &flashver_arg);
-    RTMP_SetOpt(rtmp_, &swfUrl, &swfUrl_arg);
-    RTMP_SetOpt(rtmp_, &pageUrl, &pageUrl_arg);
-
-    if (is_need_record_)
-    {
-        AVal record = AVC("record");
-        AVal record_arg = AVC("on");
-        RTMP_SetOpt(rtmp_, &record, &record_arg);
-    }
-
-	if (RTMP_SetupURL(rtmp_,(char*)url) == FALSE)
+	if(!control_rtmp_)
 	{
-		RTMP_Free(rtmp_);
-		return false;
+		RTMP_SetOpt(rtmp_, &swfUrl, &swfUrl_arg);
+		RTMP_SetOpt(rtmp_, &pageUrl, &pageUrl_arg);
+
+		if (is_need_record_)
+		{
+			AVal record = AVC("record");
+			AVal record_arg = AVC("on");
+			RTMP_SetOpt(rtmp_, &record, &record_arg);
+		}
+
+		RTMP_SetupURL(rtmp_,(char*)url);
+
+		RTMP_EnableWrite(rtmp_);  
+	}
+	/* else
+	{
+	if (is_need_record_)
+	{
+	AVal record = AVC("record");
+	AVal record_arg = AVC("on");
+	RTMP_SetOpt(rtmp_, &record, &record_arg);
 	}
 
-    RTMP_EnableWrite(rtmp_);                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       
-    
+	RTMP_SetupURL(rtmp_,(char*)url);
+
+	RTMP_EnableWrite(rtmp_);                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       
+	}*/
 	if (RTMP_Connect(rtmp_, NULL) == FALSE) 
 	{
-		RTMP_Free(rtmp_);
+		//RTMP_Free(rtmp_);
 		return false;
 	} 
 
 	/*Á¬½ÓÁ÷*/
 	if (RTMP_ConnectStream(rtmp_,0) == FALSE)
 	{
-		RTMP_Close(rtmp_);
-		RTMP_Free(rtmp_);
+		//RTMP_Close(rtmp_);
+		//RTMP_Free(rtmp_);
 		return false;
 	}
 
@@ -105,32 +119,25 @@ void LibRtmp::Close()
     RTMP_Close(rtmp_);
 }
 
-void LibRtmp::Send(const char* buf, int bufLen, int type, unsigned int timestamp)
+bool LibRtmp::Send(const char* buf, int bufLen, int type, unsigned int timestamp)
 {
-	//base::AutoLock alock(queue_lock_);
-    RTMPPacket *rtmp_pakt = NULL;
-	rtmp_pakt = (RTMPPacket*)malloc(sizeof(RTMPPacket));
-	RTMPPacket_Alloc(rtmp_pakt, bufLen);
-    RTMPPacket_Reset(rtmp_pakt);
-    
+    RTMPPacket rtmp_pakt;
+    RTMPPacket_Reset(&rtmp_pakt);
+    RTMPPacket_Alloc(&rtmp_pakt, bufLen);
 
-    rtmp_pakt->m_packetType = type;
-    rtmp_pakt->m_nBodySize = bufLen;
-    rtmp_pakt->m_nTimeStamp = timestamp;
-    rtmp_pakt->m_nChannel = 0x04;
-    rtmp_pakt->m_headerType = RTMP_PACKET_SIZE_LARGE;
-    rtmp_pakt->m_nInfoField2 = rtmp_->m_stream_id;
-    memcpy(rtmp_pakt->m_body, buf, bufLen);
+    rtmp_pakt.m_packetType = type;
+    rtmp_pakt.m_nBodySize = bufLen;
+    rtmp_pakt.m_nTimeStamp = timestamp;
+    rtmp_pakt.m_nChannel = 4;
+    rtmp_pakt.m_headerType = RTMP_PACKET_SIZE_LARGE;
+    rtmp_pakt.m_nInfoField2 = rtmp_->m_stream_id;
 
-	if (!RTMP_IsConnected(rtmp_)){
-		RTMP_Log(RTMP_LOGERROR,"rtmp is not connect\n");
-		
-	}
-	if (!RTMP_SendPacket(rtmp_,rtmp_pakt,0)){
-		RTMP_Log(RTMP_LOGERROR,"Send Error\n");
-	
-	}
-    RTMPPacket_Free(rtmp_pakt);
+    memcpy(rtmp_pakt.m_body, buf, bufLen);
+
+    int retval = RTMP_SendPacket(rtmp_, &rtmp_pakt, 0);
+    RTMPPacket_Free(&rtmp_pakt);
+
+    return !!retval;
 }
 
 void LibRtmp::SendSetChunkSize(unsigned int chunkSize)

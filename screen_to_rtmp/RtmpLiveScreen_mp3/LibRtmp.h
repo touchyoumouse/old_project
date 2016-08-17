@@ -18,7 +18,7 @@ public:
 
     void Close();
 
-    void Send(const char* buf, int bufLen, int type, unsigned int timestamp);
+    bool Send(const char* buf, int bufLen, int type, unsigned int timestamp);
 
     void SendSetChunkSize(unsigned int chunkSize);
 
@@ -35,6 +35,8 @@ private:
     FILE* flog_;
     bool is_need_record_;
     std::string stream_name_;
+public:
+	bool control_rtmp_;
 };
 
 #endif // _LIB_RTMP_H_

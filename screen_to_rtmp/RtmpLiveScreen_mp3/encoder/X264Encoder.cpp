@@ -218,7 +218,7 @@ int X264Encoder::Encode(unsigned char* szYUVFrame, unsigned char* outBuf, int& o
         }
 
         // 将起始码0x00000001，替换为nalu的大小
-     //   UI32ToBytes((char*)(outBuf+outLen), i_size-4);
+        UI32ToBytes((char*)(outBuf+outLen), i_size-4);
         outLen += i_size;
     }
 

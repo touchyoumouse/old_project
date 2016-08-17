@@ -60,6 +60,10 @@ RtmpLiveScreen::RtmpLiveScreen(const CString& audioDeviceID, const CString& vide
     last_page_count_ = -1;
 	//@feng liveScreen wait time;
 	wait_time_ = waitTime;
+
+    is_send_failed_ = false;
+
+
 }
 
 RtmpLiveScreen::~RtmpLiveScreen()
@@ -100,8 +104,7 @@ void RtmpLiveScreen::SetWebcamPosition(int x, int y)
 
 void RtmpLiveScreen::Run()
 {
-	
-
+rtmp_connect_loop:
 	
 	//@feng Delay to connect;
 	Sleep(wait_time_*60*1000);
@@ -109,7 +112,9 @@ void RtmpLiveScreen::Run()
     // 连接rtmp server，完成握手等协议
     if(!librtmp_->Open(rtmp_url_.c_str()))
 	{
-		return;
+		//MessageBox(NULL,_T("连接流媒体服务器失败!"),_T("提示"),MB_OK);
+		librtmp_->control_rtmp_=true;
+		goto rtmp_connect_loop;
 	}
 
     // 发送metadata包
@@ -123,7 +128,9 @@ void RtmpLiveScreen::Run()
 
     while (true)
     {
-        if (SimpleThread::IsStop()) break;
+		
+        if (SimpleThread::IsStop()) 
+				goto rtmp_end;/*break*/;
 
         // 从队列中取出音频或视频数据
         std::deque<RtmpDataBuffer> rtmp_datas;
@@ -141,14 +148,14 @@ void RtmpLiveScreen::Run()
         for (std::deque<RtmpDataBuffer>::iterator it = rtmp_datas.begin();
             it != rtmp_datas.end(); ++it)
         {
-			RtmpDataBuffer& rtmp_data = *it;
+			/*RtmpDataBuffer& rtmp_data = *it;
 			if (rtmp_data.data != NULL)
 			{
 				if (rtmp_data.type == FLV_TAG_TYPE_AUDIO)
-					SendAudioDataPacket(rtmp_data.data, rtmp_data.timestamp);
+					if(SendAudioDataPacket(rtmp_data.data, rtmp_data.timestamp)) break;
 				else
-					SendVideoDataPacket(rtmp_data.data, rtmp_data.timestamp, rtmp_data.is_keyframe);
-			}
+					if(SendVideoDataPacket(rtmp_data.data, rtmp_data.timestamp, rtmp_data.is_keyframe))	break;
+			}*/
 			
         }
 
@@ -159,6 +166,16 @@ void RtmpLiveScreen::Run()
     ds_capture_->StopAudio();
 
     librtmp_->Close();
+
+	goto rtmp_connect_loop;
+
+rtmp_end: 
+
+	ds_capture_->StopVideo();
+	ds_capture_->StopAudio();
+
+	librtmp_->Close();
+	return ;
 }
 
 void RtmpLiveScreen::OnCaptureAudioBuffer(base::DataBuffer* dataBuf, unsigned int timestamp)
@@ -177,7 +194,7 @@ void RtmpLiveScreen::OnCaptureVideoBuffer(base::DataBuffer* dataBuf, unsigned in
     if (SimpleThread::IsStop()) return;
     {
         base::AutoLock alock(queue_lock_);
-        process_buf_queue_.push_back(RtmpDataBuffer(FLV_TAG_TYPE_VIDEO, dataBuf->Clone(), GetTimestamp(), isKeyframe));
+        //process_buf_queue_.push_back(RtmpDataBuffer(FLV_TAG_TYPE_VIDEO, dataBuf->Clone(), GetTimestamp(), isKeyframe));
 
         SendVideoDataPacket(dataBuf, GetTimestamp(), isKeyframe);
     }
@@ -256,7 +273,7 @@ int RtmpLiveScreen::GetCurrentPPTPCount()
     return -1;
 }
 
-void RtmpLiveScreen::SendVideoDataPacket(base::DataBuffer* dataBuf, unsigned int timestamp, bool isKeyframe)
+bool RtmpLiveScreen::SendVideoDataPacket(base::DataBuffer* dataBuf, unsigned int timestamp, bool isKeyframe)
 {
     char* buf = (char*)malloc(dataBuf->BufLen() + 5);
     char* pbuf = buf;
@@ -275,13 +292,15 @@ void RtmpLiveScreen::SendVideoDataPacket(base::DataBuffer* dataBuf, unsigned int
     memcpy(pbuf, dataBuf->Buf(), dataBuf->BufLen());
     pbuf += dataBuf->BufLen();
 
-    librtmp_->Send(buf, (int)(pbuf - buf), FLV_TAG_TYPE_VIDEO, timestamp);
+    bool is_ok = librtmp_->Send(buf, (int)(pbuf - buf), FLV_TAG_TYPE_VIDEO, timestamp);
+    is_send_failed_ = !is_ok;
+	free(buf);
+	delete dataBuf;
 
-    free(buf);
-    delete dataBuf;
+	return is_ok ? true : false;
 }
 
-void RtmpLiveScreen::SendAudioDataPacket(base::DataBuffer* dataBuf, unsigned int timestamp)
+bool RtmpLiveScreen::SendAudioDataPacket(base::DataBuffer* dataBuf, unsigned int timestamp)
 {
     char* buf = (char*)malloc(dataBuf->BufLen() + 5);
     char* pbuf = buf;
@@ -311,10 +330,18 @@ void RtmpLiveScreen::SendAudioDataPacket(base::DataBuffer* dataBuf, unsigned int
     memcpy(pbuf, dataBuf->Buf(), dataBuf->BufLen());
     pbuf += dataBuf->BufLen();
 
-    librtmp_->Send(buf, (int)(pbuf - buf), FLV_TAG_TYPE_AUDIO, timestamp);
-
-    free(buf);
-    delete dataBuf;
+    if(librtmp_->Send(buf, (int)(pbuf - buf), FLV_TAG_TYPE_AUDIO, timestamp))
+	{
+		free(buf);
+		delete dataBuf;
+		return true;
+	}
+	else
+	{
+		free(buf);
+		delete dataBuf;
+		return false;
+	}
 }
 
 void RtmpLiveScreen::PostBuffer(base::DataBuffer* dataBuf)
@@ -498,4 +525,9 @@ unsigned int RtmpLiveScreen::GetInputTimestamp()
     li.cbSize = sizeof(LASTINPUTINFO);
     ::GetLastInputInfo(&li);
     return li.dwTime;
+}
+
+bool RtmpLiveScreen::IsNeedReConnect()
+{
+    return is_send_failed_;
 }

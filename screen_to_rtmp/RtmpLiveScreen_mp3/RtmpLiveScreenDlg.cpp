@@ -255,7 +255,7 @@ BOOL RtmpLiveScreenDlg::OnInitDialog()
 
         bmpinfo_->bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
         bmpinfo_->bmiHeader.biPlanes = 1;
-        bmpinfo_->bmiHeader.biBitCount = 24;
+        bmpinfo_->bmiHeader.biBitCount = 32;
         bmpinfo_->bmiHeader.biCompression = BI_RGB;
         bmpinfo_->bmiHeader.biWidth = 320;
         bmpinfo_->bmiHeader.biHeight = 240;
@@ -406,9 +406,10 @@ LRESULT RtmpLiveScreenDlg::OnNewFrame(WPARAM wParam, LPARAM lParam)
         CRect video_rect;
         GetDlgItem(IDC_VIDEO_PRIVIEW)->GetClientRect(video_rect);
         video_dc->SetStretchBltMode(STRETCH_DELETESCANS);
+        int bmpheight = abs(bmpinfo_->bmiHeader.biHeight);
         StretchDIBits(video_dc->m_hDC,
             0, 0, video_rect.Width(), video_rect.Height(),
-            0, 0, bmpinfo_->bmiHeader.biWidth, bmpinfo_->bmiHeader.biHeight,
+            0, 0, bmpinfo_->bmiHeader.biWidth, bmpheight,
             frame_buf, bmpinfo_, DIB_RGB_COLORS, SRCCOPY);
         ReleaseDC(video_dc);
 

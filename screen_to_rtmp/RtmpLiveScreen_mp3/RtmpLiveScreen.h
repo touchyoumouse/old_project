@@ -74,10 +74,12 @@ public:
 
     int GetCurrentPPTPCount();
 
-private:
-    void SendVideoDataPacket(base::DataBuffer* dataBuf, unsigned int timestamp, bool isKeyframe);
+    bool IsNeedReConnect();
 
-    void SendAudioDataPacket(base::DataBuffer* dataBuf, unsigned int timestamp);
+private:
+    bool SendVideoDataPacket(base::DataBuffer* dataBuf, unsigned int timestamp, bool isKeyframe);
+
+    bool SendAudioDataPacket(base::DataBuffer* dataBuf, unsigned int timestamp);
 
     void SendMetadataPacket();
 
@@ -123,6 +125,9 @@ private:
     unsigned int last_input_timestamp_;
     unsigned int video_change_millsecs_;
     SystemStateType state_;
+
+    volatile bool is_send_failed_;
+
 };
 
 #endif // _RTMP_LIVE_ENCODER_H_

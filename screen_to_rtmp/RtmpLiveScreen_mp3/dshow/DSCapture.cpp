@@ -114,7 +114,7 @@ void DSCapture::Create(const CString& audioDeviceID, const CString& videoDeviceI
     {
         video_encoder_thread_->SetCaptureWH(capX, capY, capWidth, capHeight);
         video_encoder_thread_->SetCaptureScreen(isNeedScreen);
-        video_encoder_thread_->SetOutputFilename(CStringToString(videoOutname));
+        //video_encoder_thread_->SetOutputFilename(CStringToString(videoOutname));
     }
 }
 

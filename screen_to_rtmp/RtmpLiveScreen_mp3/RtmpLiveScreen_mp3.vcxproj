@@ -130,6 +130,7 @@
     <ClInclude Include="dshow\qedit.h" />
     <ClInclude Include="encoder\AudioEncoderThread.h" />
     <ClInclude Include="encoder\FAACEncoder.h" />
+    <ClInclude Include="encoder\LiveImage.h" />
     <ClInclude Include="encoder\MP3Encoder.h" />
     <ClInclude Include="encoder\VideoEncoderThread.h" />
     <ClInclude Include="encoder\X264Encoder.h" />
@@ -159,6 +160,7 @@
     <ClCompile Include="dshow\DSVideoGraph.cpp" />
     <ClCompile Include="encoder\AudioEncoderThread.cpp" />
     <ClCompile Include="encoder\FAACEncoder.cpp" />
+    <ClCompile Include="encoder\LiveImage.cpp" />
     <ClCompile Include="encoder\MP3Encoder.cpp" />
     <ClCompile Include="encoder\VideoEncoderThread.cpp" />
     <ClCompile Include="encoder\X264Encoder.cpp" />

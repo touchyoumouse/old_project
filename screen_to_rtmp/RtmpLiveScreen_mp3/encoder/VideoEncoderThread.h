@@ -8,6 +8,8 @@
 class DSCaptureListener;
 class X264Encoder;
 class DSVideoGraph;
+class LiveImage;
+
 class VideoEncoderThread : public base::SimpleThread
 {
 public:
@@ -17,11 +19,7 @@ public:
 
     virtual void Run();
 
-    void SetCaptureWH(int capX, int capY, int capWidth, int capHeight);
-
     void SetListener(DSCaptureListener* listener) { listener_ = listener; }
-
-    void SetOutputFilename(const std::string& filename);
 
     void SavePicture() { is_save_picture_ = true; }
 
@@ -29,26 +27,48 @@ public:
 
     void SetCaptureScreen(bool isCapture);
 
-    void SetWebcamPosition(int x, int y) { capx1_ = x; capy1_ = y; }
+    void SetWebcamPosition(int x, int y) { webcam_x_ = x; webcam_y_ = y; }
+
+    void SetCaptureWH(int cropX, int cropY, int cropWidth, int cropHeight)
+    {
+        webcam_x_ = cropX; webcam_y_ = cropY;
+        //crop_width_ = cropWidth;
+        //crop_height_ = cropHeight;
+    }
 
 private:
     bool RGB2YUV420(LPBYTE RgbBuf,UINT nWidth,UINT nHeight,LPBYTE yuvBuf,unsigned long *len);
 
-    void SaveRgb2Bmp(char* rgbbuf, unsigned int width, unsigned int height);
+    bool RGB2YUV420_r(LPBYTE RgbBuf,UINT nWidth,UINT nHeight,LPBYTE yuvBuf,unsigned long *len);
+
+    void GetDesktopImage(char* outRgbbuf);
 
 private:
     DSVideoGraph* ds_video_graph_;
     X264Encoder* x264_encoder_;
-    std::string filename_264_;
     bool is_save_picture_;
     DSCaptureListener* listener_;
-    int capx1_, capy1_;
-    int cap_width;
-    int cap_height_;
+
+    LiveImage* live_image_;
+    int encoder_width_;
+    int encoder_height_;
+
+    int webcam_x_, webcam_y_;
+
+    // screen
     int screen_width_;
     int screen_height_;
+    int screen_chroma_;
+    int screen_pix_bytes_;
+    int screen_buf_size_;
+    int cropx_;
+    int cropy_;
+    int crop_width_;
+    int crop_height_;
+
     bool is_capture_webcam_;
     bool is_capture_screen_;
+
     int webcam_bitrate_;
     int screen_bitrate_;
 };

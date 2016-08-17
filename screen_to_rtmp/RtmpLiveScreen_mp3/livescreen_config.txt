@@ -1,9 +1,9 @@
-bitrate = 100
+bitrate = 500
 is_auto_publish = 1
 is_cap_screen = 1
 is_capure_webcam = 0
 is_need_record = 0
-rtmpurl = rtmp://192.168.1.81:1935/live/aaaa
+rtmpurl = rtmp://192.168.1.239:1941/eds/100
 video_change_millsecs = 4000
 wait_time = 0
 webcam_bitrate = 80

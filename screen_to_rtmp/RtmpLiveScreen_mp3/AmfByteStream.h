@@ -26,12 +26,12 @@ inline char* UI24ToBytes(char* buf, unsigned int val)
 
 inline char* UI32ToBytes(char* buf, unsigned int val)
 {
-   /* buf[0] = (char)(val >> 24) & 0xff;
+    buf[0] = (char)(val >> 24) & 0xff;
     buf[1] = (char)(val >> 16) & 0xff;
     buf[2] = (char)(val >> 8) & 0xff;
     buf[3] = (char)(val) & 0xff;
-    return buf + 4;*/
-	return buf;
+    return buf + 4;
+	//return buf;
 }
 
 inline char* UI64ToBytes(char* buf, unsigned __int64 val)
