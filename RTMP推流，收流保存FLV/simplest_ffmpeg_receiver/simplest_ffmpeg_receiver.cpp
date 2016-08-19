@@ -260,6 +260,21 @@ char* pps_;        // picture parameter set
 int pps_size_;
 int timestamp = 0;
 
+
+//FILE *fpSave = fopen("geth264.h264", "ab");
+
+
+
+
+void my_logoutput(void* ptr, int level, const char* fmt,va_list vl){  
+	FILE *fp = fopen("my_log.txt","a+");     
+	if(fp){     
+		vfprintf(fp,fmt,vl);  
+		fflush(fp);  
+		fclose(fp);  
+	}     
+}  
+
 #else
 //Linux...
 #ifdef __cplusplus
@@ -397,7 +412,7 @@ void SendAVCSequenceHeaderPacket()
 
 int main(int argc, char* argv[])
 {
-
+	av_log_set_callback(my_logoutput);
 	sps_ = new char[1024];
 	sps_size_ = 0;
 	pps_ = new char[1024];
@@ -490,11 +505,14 @@ int main(int argc, char* argv[])
 		if (ifmt_ctx->streams[i]->codec->codec_type == AVMEDIA_TYPE_VIDEO)
 		{
 			ff_codec_ctx_ = avcodec_alloc_context3(NULL);
-			ff_encodec_ctx_ = avcodec_alloc_context3(NULL);
+			//ff_encodec_ctx_ = avcodec_alloc_context3(NULL);
 			ret = avcodec_copy_context(ff_codec_ctx_, in_stream->codec);
 			//avcodec_copy_context(ff_encodec_ctx_, in_stream->codec);
 			pCodec = avcodec_find_decoder(ifmt_ctx->streams[i]->codec->codec_id);
-			avcodec_find_encoder(ifmt_ctx->streams[i]->codec->codec_id);
+			//avcodec_find_encoder(ifmt_ctx->streams[i]->codec->codec_id);
+
+			AVCodec *pCodec1 = avcodec_find_encoder(AV_CODEC_ID_H264);
+			ff_encodec_ctx_ = avcodec_alloc_context3(pCodec1);
 
 			{
 				/* put sample parameters */
@@ -508,12 +526,15 @@ int main(int argc, char* argv[])
 				ff_encodec_ctx_->gop_size = 10; /* emit one intra frame every ten frames */
 				ff_encodec_ctx_->max_b_frames = 1;
 				ff_encodec_ctx_->pix_fmt = AV_PIX_FMT_YUV420P;
+				av_opt_set(ff_encodec_ctx_->priv_data, "preset", "superfast", 0);
+				av_opt_set(ff_encodec_ctx_->priv_data, "tune", "zerolatency", 0);
 			}
 			if (avcodec_open2(ff_codec_ctx_, pCodec, NULL) < 0)
 			{
 				int a = 1;
 			}
-			if (avcodec_open2(ff_encodec_ctx_, pCodec, NULL) < 0)
+		
+			if (avcodec_open2(ff_encodec_ctx_, pCodec1, NULL) < 0)
 			{
 				int a = 1;
 			}
@@ -549,6 +570,34 @@ int main(int argc, char* argv[])
 	AVBitStreamFilterContext* h264bsfc = av_bitstream_filter_init("h264_mp4toannexb");
 #endif
 	int num = 0;
+	FILE *fpSave;
+	if ((fpSave = fopen("mytest1.h264", "ab+")) == NULL) //h264保存的文件名  
+		return 0;
+	unsigned char *dummy = NULL;   //输入的指针  
+	int dummy_len;
+	AVBitStreamFilterContext* bsfc = av_bitstream_filter_init("h264_mp4toannexb");
+	av_bitstream_filter_filter(bsfc, ff_codec_ctx_, NULL, &dummy, &dummy_len, NULL, 0, 0);
+	fwrite(ff_codec_ctx_->extradata, ff_codec_ctx_->extradata_size, 1, fpSave);
+	av_bitstream_filter_close(bsfc);
+	free(dummy);
+
+	for (int i = 0;i < 500;i++)
+	{
+		//------------------------------  
+		if (av_read_frame(ifmt_ctx, &pkt) >= 0)
+		{
+			if (pkt.stream_index == videoindex)
+			{
+				char nal_start[] = { 0, 0, 0, 1 };
+				fwrite(nal_start, 4, 1, fpSave);
+				fwrite(pkt.data + 4, pkt.size - 4, 1, fpSave);
+
+				//fwrite(pkt.data, 1, pkt.size, fpSave);//写数据到文件中  
+			}
+			av_free_packet(&pkt);
+		}
+	}
+	fclose(fpSave);
 	while (1) {
 		AVStream *in_stream, *out_stream;
 		//Get an AVPacket
@@ -631,6 +680,7 @@ void SendVideoData(char* buf, int bufLen, unsigned int timestamp, bool isKeyfram
 	pbuf = UI24ToBytes(pbuf, 0);    // composition time
 	//timestamp -= i_video_timestamp;
 	bool isok = Send(buf, bufLen, 0x09, timestamp);
+	timestamp += 1000;
 	if (false == isok)
 	{
 	}
@@ -646,6 +696,7 @@ void frame_info(AVPacket* avpacket,int videoindex)
 	{
 		/*if (avpacket->flags & AV_PKT_FLAG_KEY)
 		{*/
+		//fwrite(avpacket->data, 1, avpacket->size, fpSave);//写数据到文件中  
 			AVFrame*  avs_frame;
 			AVFrame*  avs_YUVframe;
 			avs_frame = av_frame_alloc();
@@ -658,13 +709,14 @@ void frame_info(AVPacket* avpacket,int videoindex)
 
 
 
-
+			SendAVCSequenceHeaderPacket();
 			int a = avpacket->buf->size;
 			if (!(avs_frame->pict_type == AV_PICTURE_TYPE_NONE))
 			{
-				SendAVCSequenceHeaderPacket();
+				//SendAVCSequenceHeaderPacket();
 				if (avs_frame->pict_type == AV_PKT_FLAG_KEY)
 				{
+					SendAVCSequenceHeaderPacket();
 					isKeyframe = true;
 					
 				}
@@ -696,14 +748,31 @@ void frame_info(AVPacket* avpacket,int videoindex)
 					AVPacket av_pakt;
 					av_init_packet(&av_pakt);
 					//strcpy(av_pakt.data, avs_YUVframe->data);
-					
-					
-					av_pakt.size = ff_encodec_ctx_->height*ff_encodec_ctx_->width*3/2;
-					uint8_t *buf = (uint8_t *)malloc(av_pakt.size);
+					av_pakt.size = avpicture_get_size(ff_encodec_ctx_->pix_fmt, ff_encodec_ctx_->width, ff_encodec_ctx_->height);
+					//av_pakt.size = ff_encodec_ctx_->height*ff_encodec_ctx_->width*3/2;
+					//uint8_t *picture_buf = (uint8_t *)av_malloc(av_pakt.size);
+					//av_pakt.size = 0;
+					av_pakt.data = NULL;
+					//av_pakt.size = sizeof(AVPicture);
+					//avpicture_fill((AVPicture *)avs_YUVframe, avs_YUVframe, ff_encodec_ctx_->pix_fmt, ff_encodec_ctx_->width, ff_encodec_ctx_->height);
 					int got_packet_ptr = 0;
 					int anv = avcodec_encode_video2(ff_encodec_ctx_, &av_pakt, avs_YUVframe, &got_packet_ptr);
 
-					SendVideoData((char*)av_pakt.data, av_pakt.size, timestamp, isKeyframe);
+
+					/*AVFrame  *testframe = NULL;
+					testframe = av_frame_alloc();
+					avcodec_decode_video2(ff_codec_ctx_, testframe, &num, &av_pakt);
+					FILE *testfile = fopen("test3.yuv", "wb");
+					fwrite(avs_YUVframe->data[0], ff_codec_ctx_->width*ff_codec_ctx_->height, 1, testfile);
+					fwrite(avs_YUVframe->data[1], ff_codec_ctx_->width*ff_codec_ctx_->height / 4, 1, testfile);
+					fwrite(avs_YUVframe->data[2], ff_codec_ctx_->width*ff_codec_ctx_->height / 4, 1, testfile);
+					fflush(testfile);
+				    fclose(testfile);*/
+
+
+					if (av_pakt.data)
+					    SendVideoData((char*)av_pakt.data, av_pakt.size, timestamp, isKeyframe);
+					timestamp += 1000;
 					//return;
 					/*fwrite(avs_YUVframe->data[0], ff_codec_ctx_->width*ff_codec_ctx_->height, 1, testfile);
 					fwrite(avs_YUVframe->data[1], ff_codec_ctx_->width*ff_codec_ctx_->height / 4, 1, testfile);
@@ -713,8 +782,11 @@ void frame_info(AVPacket* avpacket,int videoindex)
 				}
 			}
 	/*	}*/
+			
 		char *video_frame = new char(avpacket->size);
 		video_bufs_cache.push_back(video_frame);
+		av_frame_free(&avs_frame);
+		av_frame_free(&avs_YUVframe);
 	}
 }
 
