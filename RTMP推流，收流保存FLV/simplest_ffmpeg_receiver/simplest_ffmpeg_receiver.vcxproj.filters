@@ -18,5 +18,13 @@
     <ClCompile Include="simplest_ffmpeg_receiver.cpp">
       <Filter>源文件</Filter>
     </ClCompile>
+    <ClCompile Include="encodec.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="encodec.h">
+      <Filter>源文件</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>
