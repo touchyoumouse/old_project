@@ -219,6 +219,8 @@
 #include "encodec.h"
 #include <stdio.h>
 #include <deque>
+#include <vector>
+#include <list>
 #define __STDC_CONSTANT_MACROS
 
 #ifdef _WIN32
@@ -259,7 +261,7 @@ int sps_size_;
 char* pps_;        // picture parameter set
 int pps_size_;
 int timestamp = 0;
-
+std::list<AVFrame*> video_frame_list_;
 
 //FILE *fpSave = fopen("geth264.h264", "ab");
 
@@ -298,10 +300,10 @@ extern "C"
 #endif
 #endif
 void SendSetChunkSize(unsigned int chunkSize);
-std::deque<char*> video_bufs_cache;
+std::deque<AVPacket* > video_bufs_cache;
 //'1': Use H.264 Bitstream Filter 
 #define USE_H264BSF 1
-void frame_info(AVPacket *,int);
+void frame_info();
 bool isKeyframe = false;
 AVCodecContext* ff_codec_ctx_;
 AVCodec *pCodec;
@@ -313,6 +315,13 @@ X264Encoder* x264_encoder_;
 RTMPPacket *rtmp_pakt;
 char* live_264buf_;
 int live_264size_;
+
+void beginthread_fun(void *a)
+{
+	frame_info();
+}
+
+
 int init_RTMP(char * stream_url_)
 {
 	{
@@ -382,6 +391,7 @@ bool Send(const char* buf, int bufLen, int type, unsigned int timestamp)
 		int a = 10;
 
 	}
+
 	int retval = RTMP_SendPacket(rtmp, rtmp_pakt, 0);
  	RTMPPacket_Free(rtmp_pakt);
 	free(rtmp_pakt);
@@ -470,7 +480,7 @@ void SendAVCSequenceHeaderPacket()
 	//Send(avc_seq_buf, (int)(pbuf - avc_seq_buf), 0x09, 0);
 }
 
-
+#include <process.h> /* _beginthread, _endthread */
 
 int main(int argc, char* argv[])
 {
@@ -478,7 +488,7 @@ int main(int argc, char* argv[])
 	{
 		//x264
 		x264_encoder_ = new X264Encoder();
-		x264_encoder_->Init(640, 480, 500, 25, 3, 2, 0);
+		x264_encoder_->Init(1280, 720, 500, 25, 3, 8, 1);
 	}
 
 
@@ -639,8 +649,8 @@ int main(int argc, char* argv[])
 		}
 	}
 
-	live_264size_ = ff_codec_ctx_->width*ff_codec_ctx_->height * 4;
-	live_264buf_ = new char[live_264size_];
+	live_264size_ = 1280 * 720 * 2;
+	
 	//Write file header
 	ret = avformat_write_header(ofmt_ctx, NULL);
 	if (ret < 0) {
@@ -648,6 +658,9 @@ int main(int argc, char* argv[])
 		goto end;
 	}
 
+	//进入读取程序
+	
+	_beginthread(beginthread_fun, 0, NULL);
 #if USE_H264BSF
 	AVBitStreamFilterContext* h264bsfc = av_bitstream_filter_init("h264_mp4toannexb");
 #endif
@@ -700,16 +713,49 @@ int main(int argc, char* argv[])
 	fclose(fpSave);
 #endif
 	//////////////////////////////////////////////////////////////////////////
+	isKeyframe = true;
 	while (1) {
 		AVStream *in_stream, *out_stream;
 		//Get an AVPacket
 		ret = av_read_frame(ifmt_ctx, &pkt);
 		if (ret < 0)
 			break;
+//////////////////////////////////////////////////////////////////////////
 		
-		frame_info(&pkt,videoindex);
+		 //video_bufs_cache.push_back(&pkt);
+		//frame_info(&pkt,videoindex)
+		//if (pkt.flags != CODEC_ID_NONE)
+		if (pkt.stream_index == videoindex)
+		{
+			if ((pkt.size > 0) && (pkt.flags & AV_PKT_FLAG_KEY))
+			{
+				double duration = pkt.duration * 1000.0 / ff_codec_ctx_->time_base.den;
 
+				AVFrame*  avs_frame;
+				
+				avs_frame = av_frame_alloc();
+				
+				uint8_t *out_buffer;
+				//decode
+				int num = 0;
+				int av_num = avcodec_decode_video2(ff_codec_ctx_, avs_frame, &num, &pkt);
+				if (avs_frame->pict_type != AV_PICTURE_TYPE_NONE)
+				{
+					AVFrame*  avs_YUVframe;
+					avs_YUVframe = av_frame_alloc();
+					out_buffer = new uint8_t[avpicture_get_size(AV_PIX_FMT_YUV420P, ff_codec_ctx_->width, ff_codec_ctx_->height)];
+					avpicture_fill((AVPicture *)avs_YUVframe, (uint8_t*)out_buffer, AV_PIX_FMT_YUV420P, ff_codec_ctx_->width, ff_codec_ctx_->height);
+					struct SwsContext * img_convert_ctx;
+					img_convert_ctx = sws_getContext(ff_codec_ctx_->width, ff_codec_ctx_->height, ff_codec_ctx_->pix_fmt, ff_codec_ctx_->width, ff_codec_ctx_->height, AV_PIX_FMT_YUV420P, SWS_BICUBIC, NULL, NULL, NULL);
+					sws_scale(img_convert_ctx, avs_frame->data, avs_frame->linesize, 0, ff_codec_ctx_->height, avs_YUVframe->data, avs_YUVframe->linesize);
 
+					video_frame_list_.push_back(avs_YUVframe);
+				}
+
+				av_frame_free(&avs_frame);
+			}
+		}
+//////////////////////////////////////////////////////////////////////////
 		in_stream = ifmt_ctx->streams[pkt.stream_index];
 		out_stream = ofmt_ctx->streams[pkt.stream_index];
 		/* copy packet */
@@ -768,6 +814,8 @@ void SendVideoData(char* buf, int bufLen, unsigned int timestamp, bool isKeyfram
 {
 	//FILE_LOG_DEBUG("size: %d, timestamp: %d\n", bufLen, timestamp);
 
+#define USE_FFMPEG_ENCODEC 1
+#if USE_FFMPEG_ENCODEC
 	char* pbuf = buf;
 
 	unsigned char flag = 0;
@@ -780,6 +828,8 @@ void SendVideoData(char* buf, int bufLen, unsigned int timestamp, bool isKeyfram
 
 	pbuf = UI08ToBytes(pbuf, 1);    // avc packet type (0, nalu)
 	pbuf = UI24ToBytes(pbuf, 0);    // composition time
+
+#endif
 	//timestamp -= i_video_timestamp;
 	bool isok = Send(buf, bufLen, 0x09, timestamp);
 	//timestamp += 50;
@@ -790,126 +840,181 @@ void SendVideoData(char* buf, int bufLen, unsigned int timestamp, bool isKeyfram
 }
 
 
+int SendH264Packet(unsigned char *data, unsigned int size, int bIsKeyFrame, unsigned int nTimeStamp);
 
-
-void frame_info(AVPacket* avpacket,int videoindex)
+void frame_info(void/*AVPacket* avpacket,int videoindex*/)
 {
-	if (avpacket->stream_index == videoindex)
+	
+	while (1)
 	{
-		/*if (avpacket->flags & AV_PKT_FLAG_KEY)
-		{*/
-		//fwrite(avpacket->data, 1, avpacket->size, fpSave);//写数据到文件中  
+		//continue;
+		if (video_frame_list_.empty())
+			continue;
+		for (std::list<AVFrame *>::iterator it = video_frame_list_.begin(); it != video_frame_list_.end(); it++)
+		{
+			//if (it->flags != ) continue;
+			
 			AVFrame*  avs_frame;
-			AVFrame*  avs_YUVframe;
 			avs_frame = av_frame_alloc();
-			avs_YUVframe = av_frame_alloc();
-			uint8_t *out_buffer;
-			//decode
-			int num = 0;
-			int av_num = avcodec_decode_video2(ff_codec_ctx_, avs_frame, &num, avpacket);
-			
+			avs_frame = *it;
 
-			//SendAVCSequenceHeaderPacket();
-			int a = avpacket->buf->size;
-			if (!(avs_frame->pict_type == AV_PICTURE_TYPE_NONE))
+#define SAVE_PICTURE 0
+#if  SAVE_PICTURE
+			
+			FILE *testfile = fopen("test5.yuv", "wb");
+			fwrite(avs_frame->data[0], ff_codec_ctx_->width*ff_codec_ctx_->height, 1, testfile);
+			fwrite(avs_frame->data[1], ff_codec_ctx_->width*ff_codec_ctx_->height / 4, 1, testfile);
+			fwrite(avs_frame->data[2], ff_codec_ctx_->width*ff_codec_ctx_->height / 4, 1, testfile);
+			//fwrite(&nalbuf[0], ff_codec_ctx_->width*ff_codec_ctx_->height, 1, testfile);
+			//fwrite(&nalbuf[1], ff_codec_ctx_->width*ff_codec_ctx_->height / 4, 1, testfile);
+			//fwrite(&nalbuf[2], ff_codec_ctx_->width*ff_codec_ctx_->height / 4, 1, testfile);
+			fflush(testfile);
+			fclose(testfile);
+#endif
+#define USE_LIST_ 0
+#if USE_LIST_
+			if (avpacket->stream_index == videoindex)
 			{
-				//SendAVCSequenceHeaderPacket();
-				if (avs_frame->pict_type == AV_PKT_FLAG_KEY)
+				/*if (avpacket->flags & AV_PKT_FLAG_KEY)
+				{*/
+				//fwrite(avpacket->data, 1, avpacket->size, fpSave);//写数据到文件中
+				AVFrame*  avs_frame;
+				AVFrame*  avs_YUVframe;
+				avs_frame = av_frame_alloc();
+				avs_YUVframe = av_frame_alloc();
+				uint8_t *out_buffer;
+				//decode
+				int num = 0;
+				int av_num = avcodec_decode_video2(ff_codec_ctx_, avs_frame, &num, avpacket);
+
+				int a = avpacket->buf->size;
+
+				if (!(avs_frame->pict_type == AV_PICTURE_TYPE_NONE))
 				{
-					SendAVCSequenceHeaderPacket();
-					isKeyframe = true;
-					
-				}
-				//uint8_t *buf = (uint8_t *)malloc(*avs_frame->pkt_size);
-				//avcodec_encode_video(ff_encodec_ctx_, buf, *avs_frame->linesize, avs_frame);
-				
-				
-				int pktsize = avpacket->size;
-				int keyframe = avs_frame->key_frame;
-				int width = avs_frame->width;
-				int hight = avs_frame->height;
-				printf("keyframe = %d \ n", keyframe);
-				printf("width = %d \n", width);
-				printf("hight = %d \n", hight);
-				printf("pktsize = %d \n", pktsize);
-				if (1)
-				{
-					//int num = 1;
-					//FILE *testfile = fopen("test2.rgb", "wb");
-					
-					out_buffer = new uint8_t[avpicture_get_size(AV_PIX_FMT_YUV420P, ff_codec_ctx_->width, ff_codec_ctx_->height)];
-					avpicture_fill((AVPicture *)avs_YUVframe, out_buffer, AV_PIX_FMT_YUV420P, ff_codec_ctx_->width, ff_codec_ctx_->height);
-					struct SwsContext * img_convert_ctx;
-					img_convert_ctx = sws_getContext(ff_codec_ctx_->width, ff_codec_ctx_->height, ff_codec_ctx_->pix_fmt, ff_codec_ctx_->width, ff_codec_ctx_->height, AV_PIX_FMT_YUV420P, SWS_BICUBIC, NULL, NULL, NULL);
-					sws_scale(img_convert_ctx, (const uint8_t* const*)avs_frame->data, avs_frame->linesize, 0, ff_codec_ctx_->height, avs_YUVframe->data, avs_YUVframe->linesize);
-					//RGB  
-					//fwrite(avs_YUVframe->data[0], (ff_codec_ctx_->width)*(ff_codec_ctx_->height) * 3, 1, testfile);
-//////////////////////////////////////////////////////////////////////////
-#define X264_MODE 0
-#if X264_MODE
-					
-					int outlen = live_264size_;
-					char* nalbuf = x264_encoder_->Encode((unsigned char*)avs_YUVframe->data,
-						(unsigned char*)live_264buf_, outlen, isKeyframe);
-					
-#else			
-					AVPacket av_pakt;
-					av_init_packet(&av_pakt);
-					av_pakt.size = avpicture_get_size(ff_encodec_ctx_->pix_fmt, ff_encodec_ctx_->width, ff_encodec_ctx_->height);
-					av_pakt.data = NULL;
-					int got_packet_ptr = 0;
-					int anv = avcodec_encode_video2(ff_encodec_ctx_, &av_pakt, avs_YUVframe, &got_packet_ptr);
 
 #endif
-//////////////////////////////////////////////////////////////////////////
-							
-								
-//////////////////////////////////////////////////////////////////////////
-					/*AVFrame  *testframe = NULL;
-					testframe = av_frame_alloc();
-					avcodec_decode_video2(ff_codec_ctx_, testframe, &num, &av_pakt);*/
-					//FILE *testfile = fopen("test4.yuv", "wb");
-					/*fwrite(avs_YUVframe->data[0], ff_codec_ctx_->width*ff_codec_ctx_->height, 1, testfile);
-					fwrite(avs_YUVframe->data[1], ff_codec_ctx_->width*ff_codec_ctx_->height / 4, 1, testfile);
-					fwrite(avs_YUVframe->data[2], ff_codec_ctx_->width*ff_codec_ctx_->height / 4, 1, testfile);*/
-					/*fwrite(&nalbuf[0], ff_codec_ctx_->width*ff_codec_ctx_->height, 1, testfile);
-					fwrite(&nalbuf[1], ff_codec_ctx_->width*ff_codec_ctx_->height / 4, 1, testfile);
-					fwrite(&nalbuf[2], ff_codec_ctx_->width*ff_codec_ctx_->height / 4, 1, testfile);
-					fflush(testfile);
-					fclose(testfile);
-					*/
-#if X264_MODE
-			if (nalbuf)
-						SendVideoData(nalbuf, outlen, timestamp, isKeyframe);
-			free(live_264buf_);
-			//free(nalbuf);
-			live_264buf_ = NULL;
-			//nalbuf = NULL;
-			
-#else									
-			if (av_pakt.data)
-					SendVideoData((char*)av_pakt.data, av_pakt.size, timestamp, isKeyframe);
+					//SendAVCSequenceHeaderPacket();
+					if (avs_frame->pict_type == AV_PKT_FLAG_KEY)
+					{
+						//SendAVCSequenceHeaderPacket();
+						isKeyframe = true;
+
+					}
+					//uint8_t *buf = (uint8_t *)malloc(*avs_frame->pkt_size);
+					//avcodec_encode_video(ff_encodec_ctx_, buf, *avs_frame->linesize, avs_frame);
+
+
+					//int pktsize = avpacket->size;
+					int keyframe = avs_frame->key_frame;
+					int width = avs_frame->width;
+					int hight = avs_frame->height;
+					printf("keyframe = %d \ n", keyframe);
+					printf("width = %d \n", width);
+					printf("hight = %d \n", hight);
+					//printf("pktsize = %d \n", pktsize);
+
+					{
+						//int num = 1;
+						//FILE *testfile = fopen("test2.rgb", "wb");
+						//////////////////////////////////////////////////////////////////////////
+#if USE_LIST_					
+						out_buffer = new uint8_t[avpicture_get_size(AV_PIX_FMT_YUV420P, ff_codec_ctx_->width, ff_codec_ctx_->height)];
+						avpicture_fill((AVPicture *)avs_YUVframe, (uint8_t*)out_buffer, AV_PIX_FMT_YUV420P, ff_codec_ctx_->width, ff_codec_ctx_->height);
+						struct SwsContext * img_convert_ctx;
+						img_convert_ctx = sws_getContext(ff_codec_ctx_->width, ff_codec_ctx_->height, ff_codec_ctx_->pix_fmt, ff_codec_ctx_->width, ff_codec_ctx_->height, AV_PIX_FMT_YUV420P, SWS_BICUBIC, NULL, NULL, NULL);
+						sws_scale(img_convert_ctx, avs_frame->data, avs_frame->linesize, 0, ff_codec_ctx_->height, avs_YUVframe->data, avs_YUVframe->linesize);
+						//RGB  
+						//fwrite(avs_YUVframe->data[0], (ff_codec_ctx_->width)*(ff_codec_ctx_->height) * 3, 1, testfile);
 #endif
-					//Sleep(200);
-					isKeyframe = false;
-					timestamp += 40;
-					
-					//delete x264_encoder_;
+						//////////////////////////////////////////////////////////////////////////
+#define X264_MODE 1
+#if X264_MODE
+						
+						live_264buf_ = new char[live_264size_];
+						avpicture_fill((AVPicture *)live_264buf_, (uint8_t*)avs_frame,
+							PIX_FMT_YUV420P, 1280, 720);
+						int outlen = live_264size_;
+
+						char* nalbuf = x264_encoder_->Encode((unsigned char*)avs_frame,
+							(unsigned char*)live_264buf_, outlen, isKeyframe);
+						isKeyframe = false;
+#else			
+						AVPacket av_pakt;
+						av_init_packet(&av_pakt);
+						av_pakt.size = avpicture_get_size(ff_encodec_ctx_->pix_fmt, ff_encodec_ctx_->width, ff_encodec_ctx_->height);
+						av_pakt.data = NULL;
+						int got_packet_ptr = 0;
+						int anv = avcodec_encode_video2(ff_encodec_ctx_, &av_pakt, avs_frame, &got_packet_ptr);
+
+#endif
+						//////////////////////////////////////////////////////////////////////////
+						//////////////////////////////////////////////////////////////////////////
+						/*AVFrame  *testframe = NULL;
+						testframe = av_frame_alloc();
+						avcodec_decode_video2(ff_codec_ctx_, testframe, &num, &av_pakt);*/
+						//FILE *testfile = fopen("test4.yuv", "wb");
+						/*fwrite(avs_YUVframe->data[0], ff_codec_ctx_->width*ff_codec_ctx_->height, 1, testfile);
+						fwrite(avs_YUVframe->data[1], ff_codec_ctx_->width*ff_codec_ctx_->height / 4, 1, testfile);
+						fwrite(avs_YUVframe->data[2], ff_codec_ctx_->width*ff_codec_ctx_->height / 4, 1, testfile);*/
+						/*fwrite(&nalbuf[0], ff_codec_ctx_->width*ff_codec_ctx_->height, 1, testfile);
+						fwrite(&nalbuf[1], ff_codec_ctx_->width*ff_codec_ctx_->height / 4, 1, testfile);
+						fwrite(&nalbuf[2], ff_codec_ctx_->width*ff_codec_ctx_->height / 4, 1, testfile);
+						fflush(testfile);
+						fclose(testfile);
+						*/
+#if X264_MODE
+						if (nalbuf)
+							//SendVideoData(nalbuf, outlen, timestamp, isKeyframe);
+							SendH264Packet((unsigned char*)nalbuf, outlen, isKeyframe, timestamp);
+						Sleep(100);
+						delete live_264buf_;
+						//free(nalbuf);
+						live_264buf_ = NULL;
+						//video_frame_list_.pop_front();
+						av_frame_free(&avs_frame);
+						avs_frame = NULL;
+						
+						
+						//nalbuf = NULL;
+
+#else									
+						if (av_pakt.data)
+						{
+							double duration = av_pakt.duration * 1000.0 / ff_encodec_ctx_->time_base.den;
+							//ifmt_ctx->streams[videoindex]->time_base.den;
+							SendVideoData((char*)av_pakt.data, av_pakt.size, timestamp, isKeyframe);
+							Sleep(100);
+						}
+						isKeyframe = false;
+						av_frame_free(&avs_frame);
+
+
+#endif
+						//Sleep(200);
+						isKeyframe = false;
+						timestamp += 40;
+						if (video_frame_list_.empty())
+							break;
+						//delete out_buffer;
+						//out_buffer = NULL;
+						//delete x264_encoder_;
 						//return;
-					/*fwrite(avs_YUVframe->data[0], ff_codec_ctx_->width*ff_codec_ctx_->height, 1, testfile);
-					fwrite(avs_YUVframe->data[1], ff_codec_ctx_->width*ff_codec_ctx_->height / 4, 1, testfile);
-					fwrite(avs_YUVframe->data[2], ff_codec_ctx_->width*ff_codec_ctx_->height / 4, 1, testfile);*/
-					//fflush(testfile);
-					//fclose(testfile);
+						/*fwrite(avs_YUVframe->data[0], ff_codec_ctx_->width*ff_codec_ctx_->height, 1, testfile);
+						fwrite(avs_YUVframe->data[1], ff_codec_ctx_->width*ff_codec_ctx_->height / 4, 1, testfile);
+						fwrite(avs_YUVframe->data[2], ff_codec_ctx_->width*ff_codec_ctx_->height / 4, 1, testfile);*/
+						//fflush(testfile);
+						//fclose(testfile);
+					
+					}
+					/*	}*/
+
+					//char *video_frame = new char(avpacket->size);
+					//video_bufs_cache.push_back(video_frame);
+					//av_frame_free(&avs_frame);
+					//av_frame_free(&avs_YUVframe);
 				}
-			}
-	/*	}*/
-			
-		char *video_frame = new char(avpacket->size);
-		//video_bufs_cache.push_back(video_frame);
-		av_frame_free(&avs_frame);
-		av_frame_free(&avs_YUVframe);
-	}
+
+		}
 }
 
 
@@ -923,3 +1028,146 @@ void frame_info(AVPacket* avpacket,int videoindex)
 
 
 ////////////////////////////////////////
+
+
+
+
+int SendVideoSpsPps(unsigned char *pps, int pps_len, unsigned char * sps, int sps_len);
+int SendPacket(unsigned int nPacketType, unsigned char *data, unsigned int size, unsigned int nTimestamp);
+
+int SendH264Packet(unsigned char *data, unsigned int size, int bIsKeyFrame, unsigned int nTimeStamp)
+{
+	if (data == NULL && size < 11){
+		return false;
+	}
+
+	unsigned char *body = (unsigned char*)malloc(size + 9);
+	memset(body, 0, size + 9);
+
+	int i = 0;
+	if (bIsKeyFrame){
+		body[i++] = 0x17;// 1:Iframe  7:AVC   
+		body[i++] = 0x01;// AVC NALU   
+		body[i++] = 0x00;
+		body[i++] = 0x00;
+		body[i++] = 0x00;
+
+
+		// NALU size   
+		body[i++] = size >> 24 & 0xff;
+		body[i++] = size >> 16 & 0xff;
+		body[i++] = size >> 8 & 0xff;
+		body[i++] = size & 0xff;
+		// NALU data   
+		memcpy(&body[i], data, size);
+		SendVideoSpsPps((unsigned char*)pps_, pps_size_, (unsigned char*)sps_, sps_size_);
+	}
+	else{
+		body[i++] = 0x27;// 2:Pframe  7:AVC   
+		body[i++] = 0x01;// AVC NALU   
+		body[i++] = 0x00;
+		body[i++] = 0x00;
+		body[i++] = 0x00;
+
+
+		// NALU size   
+		body[i++] = size >> 24 & 0xff;
+		body[i++] = size >> 16 & 0xff;
+		body[i++] = size >> 8 & 0xff;
+		body[i++] = size & 0xff;
+		// NALU data   
+		memcpy(&body[i], data, size);
+	}
+
+
+	int bRet = SendPacket(RTMP_PACKET_TYPE_VIDEO, body, i + size, nTimeStamp);
+
+	free(body);
+
+	return bRet;
+}
+
+
+int SendVideoSpsPps(unsigned char *pps, int pps_len, unsigned char * sps, int sps_len)
+{
+	RTMPPacket * packet = NULL;//rtmp包结构
+	unsigned char * body = NULL;
+	int i;
+	packet = (RTMPPacket *)malloc(RTMP_HEAD_SIZE + 1024);
+	//RTMPPacket_Reset(packet);//重置packet状态
+	memset(packet, 0, RTMP_HEAD_SIZE + 1024);
+	packet->m_body = (char *)packet + RTMP_HEAD_SIZE;
+	body = (unsigned char *)packet->m_body;
+	i = 0;
+	body[i++] = 0x17;
+	body[i++] = 0x00;
+
+	body[i++] = 0x00;
+	body[i++] = 0x00;
+	body[i++] = 0x00;
+
+	/*AVCDecoderConfigurationRecord*/
+	body[i++] = 0x01;
+	body[i++] = sps[1];
+	body[i++] = sps[2];
+	body[i++] = sps[3];
+	body[i++] = 0xff;
+
+	/*sps*/
+	body[i++] = 0xe1;
+	body[i++] = (sps_len >> 8) & 0xff;
+	body[i++] = sps_len & 0xff;
+	memcpy(&body[i], sps, sps_len);
+	i += sps_len;
+
+	/*pps*/
+	body[i++] = 0x01;
+	body[i++] = (pps_len >> 8) & 0xff;
+	body[i++] = (pps_len)& 0xff;
+	memcpy(&body[i], pps, pps_len);
+	i += pps_len;
+
+	packet->m_packetType = RTMP_PACKET_TYPE_VIDEO;
+	packet->m_nBodySize = i;
+	packet->m_nChannel = 0x04;
+	packet->m_nTimeStamp = 0;
+	packet->m_hasAbsTimestamp = 0;
+	packet->m_headerType = RTMP_PACKET_SIZE_MEDIUM;
+	packet->m_nInfoField2 = rtmp->m_stream_id;
+
+	/*调用发送接口*/
+	int nRet = RTMP_SendPacket(rtmp, packet, TRUE);
+	free(packet);    //释放内存
+	return nRet;
+}
+int SendPacket(unsigned int nPacketType, unsigned char *data, unsigned int size, unsigned int nTimestamp)
+{
+	RTMPPacket* packet;
+	/*分配包内存和初始化,len为包体长度*/
+	packet = (RTMPPacket *)malloc(RTMP_HEAD_SIZE + size);
+	memset(packet, 0, RTMP_HEAD_SIZE);
+	/*包体内存*/
+	packet->m_body = (char *)packet + RTMP_HEAD_SIZE;
+	packet->m_nBodySize = size;
+	memcpy(packet->m_body, data, size);
+	packet->m_hasAbsTimestamp = 0;
+	packet->m_packetType = nPacketType; /*此处为类型有两种一种是音频,一种是视频*/
+	packet->m_nInfoField2 = rtmp->m_stream_id;
+	packet->m_nChannel = 0x04;
+
+	packet->m_headerType = RTMP_PACKET_SIZE_LARGE;
+	if (RTMP_PACKET_TYPE_AUDIO == nPacketType && size != 4)
+	{
+		packet->m_headerType = RTMP_PACKET_SIZE_MEDIUM;
+	}
+	packet->m_nTimeStamp = nTimestamp;
+	/*发送*/
+	int nRet = 0;
+	if (RTMP_IsConnected(rtmp))
+	{
+		nRet = RTMP_SendPacket(rtmp, packet, TRUE); /*TRUE为放进发送队列,FALSE是不放进发送队列,直接发送*/
+	}
+	/*释放内存*/
+	free(packet);
+	return nRet;
+}
