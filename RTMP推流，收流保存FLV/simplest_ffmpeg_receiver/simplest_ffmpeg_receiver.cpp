@@ -514,7 +514,7 @@ int main(int argc, char* argv[])
 	AVDictionary* ffoptions = NULL;
 	av_dict_set(&ffoptions, "rtsp_transport", "tcp", 0);
 	av_dict_set(&ffoptions, "fflags", "nobuffer", 0);
-	in_filename = "rtsp://192.168.1.176/0/888888:888888/main";
+	in_filename = "rtsp://192.168.1.175/0/888888:888888/main";
 
 	rtmp_url = "rtmp://127.0.0.1/live/123";
 	init_RTMP(rtmp_url);
@@ -750,8 +750,10 @@ int main(int argc, char* argv[])
 					sws_scale(img_convert_ctx, avs_frame->data, avs_frame->linesize, 0, ff_codec_ctx_->height, avs_YUVframe->data, avs_YUVframe->linesize);
 
 					video_frame_list_.push_back(avs_YUVframe);
-				}
 
+					//av_frame_free(&avs_YUVframe);
+				}
+				
 				av_frame_free(&avs_frame);
 			}
 		}
@@ -847,10 +849,11 @@ void frame_info(void/*AVPacket* avpacket,int videoindex*/)
 	
 	while (1)
 	{
+		//Sleep(6000);
 		//continue;
 		if (video_frame_list_.empty())
 			continue;
-		for (std::list<AVFrame *>::iterator it = video_frame_list_.begin(); it != video_frame_list_.end(); it++)
+		for (std::list<AVFrame *>::iterator it = video_frame_list_.begin(); it != video_frame_list_.end(); ++it)
 		{
 			//if (it->flags != ) continue;
 			
@@ -930,14 +933,39 @@ void frame_info(void/*AVPacket* avpacket,int videoindex*/)
 #define X264_MODE 1
 #if X264_MODE
 						
-						live_264buf_ = new char[live_264size_];
-						avpicture_fill((AVPicture *)live_264buf_, (uint8_t*)avs_frame,
+						
+					/*
+					        live_264buf_ = new char[live_264size_];
+						    avpicture_fill((AVPicture *)live_264buf_, (uint8_t*)avs_frame,
 							PIX_FMT_YUV420P, 1280, 720);
+							SwsContext *sws_ctx_ = sws_getContext(1920, 1080, AV_PIX_FMT_YUV420P,
+							1280, 720, PIX_FMT_RGB32,
+							SWS_BICUBIC, 0, 0, 0);
+							sws_scale(sws_ctx_, avs_frame->data, avs_frame->linesize, 0,
+							height_, live_264buf_, live_264size_);*/
+						//AVFrame *src_frame_= av_frame_alloc();
+						AVFrame *yuv_frame_ = av_frame_alloc();
+				
+						int live_yuvsize_ = 1280 * 720 * 3 / 2;
+						char* live_yuvbuf_ = new char[live_yuvsize_];
+
+						avpicture_fill((AVPicture *)yuv_frame_, (uint8_t*)live_yuvbuf_,
+							PIX_FMT_YUV420P, 1280, 720);
+
+						SwsContext *sws_ctx_ = sws_getContext(1920, 1080, AV_PIX_FMT_YUV420P,
+							1280, 720, AV_PIX_FMT_YUV420P,
+							SWS_BICUBIC, 0, 0, 0);
+						sws_scale(sws_ctx_, avs_frame->data, avs_frame->linesize, 0,
+							720, yuv_frame_->data, yuv_frame_->linesize);
+
+
+
 						int outlen = live_264size_;
 
-						char* nalbuf = x264_encoder_->Encode((unsigned char*)avs_frame,
+						char* nalbuf = x264_encoder_->Encode((unsigned char*)live_yuvbuf_,
 							(unsigned char*)live_264buf_, outlen, isKeyframe);
-						isKeyframe = false;
+
+						
 #else			
 						AVPacket av_pakt;
 						av_init_packet(&av_pakt);
@@ -966,12 +994,15 @@ void frame_info(void/*AVPacket* avpacket,int videoindex*/)
 						if (nalbuf)
 							//SendVideoData(nalbuf, outlen, timestamp, isKeyframe);
 							SendH264Packet((unsigned char*)nalbuf, outlen, isKeyframe, timestamp);
+						//isKeyframe = false;
 						Sleep(100);
-						delete live_264buf_;
+						delete live_yuvbuf_;
+						
 						//free(nalbuf);
-						live_264buf_ = NULL;
+						live_yuvbuf_ = NULL;
 						//video_frame_list_.pop_front();
-						av_frame_free(&avs_frame);
+						av_frame_free(&yuv_frame_);
+						//av_frame_free(&avs_frame);
 						avs_frame = NULL;
 						
 						
@@ -994,7 +1025,7 @@ void frame_info(void/*AVPacket* avpacket,int videoindex*/)
 						isKeyframe = false;
 						timestamp += 40;
 						if (video_frame_list_.empty())
-							break;
+							return;
 						//delete out_buffer;
 						//out_buffer = NULL;
 						//delete x264_encoder_;

@@ -9,6 +9,7 @@
 
 #include "encodec.h"
 #include "string.h"
+#include "stdio.h"
 
 //#include "base/platform.h"
 //#include "base/byte_stream.h"
@@ -128,13 +129,12 @@ int X264Encoder::Destroy()
 char* X264Encoder::Encode(unsigned char* szYUVFrame, unsigned char* outBuf,
 	int& outLen, bool& isKeyframe)
 {
+
 	char* ret_264buf = NULL;
 
 	picture_.img.plane[0] = szYUVFrame;
 	picture_.img.plane[1] = szYUVFrame + param_.i_width*param_.i_height;
 	picture_.img.plane[2] = picture_.img.plane[1] + param_.i_width*param_.i_height / 4;
-
-
 
 	param_.i_frame_total++;
 	picture_.i_pts = (int64_t)param_.i_frame_total * param_.i_fps_den;
