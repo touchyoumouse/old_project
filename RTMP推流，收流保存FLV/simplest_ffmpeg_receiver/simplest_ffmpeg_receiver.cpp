@@ -319,6 +319,7 @@ int live_264size_;
 void beginthread_fun(void *a)
 {
 	frame_info();
+	return;
 }
 
 
@@ -346,7 +347,7 @@ int init_RTMP(char * stream_url_)
 	err = RTMP_ConnectStream(rtmp, 0);
 	if (err <= 0) return false;
 
-	rtmp->m_outChunkSize = 1024;
+	rtmp->m_outChunkSize = 1024 * 1024;
 	SendSetChunkSize(rtmp->m_outChunkSize);
 }
 void SendSetChunkSize(unsigned int chunkSize)
@@ -488,7 +489,7 @@ int main(int argc, char* argv[])
 	{
 		//x264
 		x264_encoder_ = new X264Encoder();
-		x264_encoder_->Init(1280, 720, 500, 25, 3, 8, 1);
+		x264_encoder_->Init(1920, 1080, 500, 25, 3, 8, 1);
 	}
 
 
@@ -509,7 +510,7 @@ int main(int argc, char* argv[])
 	int ret, i;
 	int videoindex = -1;
 	int frame_index = 0;
-	///in_filename  = "rtmp://live.hkstv.hk.lxdns.com/live/hks";
+	//in_filename  = "rtmp://live.hkstv.hk.lxdns.com/live/hks";
 
 	AVDictionary* ffoptions = NULL;
 	av_dict_set(&ffoptions, "rtsp_transport", "tcp", 0);
@@ -549,21 +550,40 @@ int main(int argc, char* argv[])
 		int a = 1;
 		}*/
 		/////////////////////////////pps sps/////////////////////////////////////////////
-		for (int i = 0; i < ifmt_ctx->streams[0]->codec->extradata_size; i++)
+		for (int i = 0; i < ifmt_ctx->streams[videoindex]->codec->extradata_size; i++)
 		{
-			printf("%x ", ifmt_ctx->streams[0]->codec->extradata[i]);
+			printf("%x ", ifmt_ctx->streams[videoindex]->codec->extradata[i]);
 		}
-		sps_size_ = ifmt_ctx->streams[0]->codec->extradata[6] * 0xFF + ifmt_ctx->streams[0]->codec->extradata[7];
-		pps_size_ = ifmt_ctx->streams[0]->codec->extradata[8 + sps_size_ + 1] * 0xFF + ifmt_ctx->streams[0]->codec->extradata[8 + sps_size_ + 2];
+#define RTMP_EXTRADATA 0
+#if RTMP_EXTRADATA
+		sps_size_ = ifmt_ctx->streams[videoindex]->codec->extradata[6] * 0xFF + ifmt_ctx->streams[videoindex]->codec->extradata[7] ;
+		pps_size_ = ifmt_ctx->streams[videoindex]->codec->extradata[8 + sps_size_ + 1] * 0xFF + ifmt_ctx->streams[videoindex]->codec->extradata[8 + sps_size_ + 2];
 		for (int i = 0; i < sps_size_; i++)
 		{
-			sps_[i] = ifmt_ctx->streams[0]->codec->extradata[i + 8];
+			sps_[i] = ifmt_ctx->streams[videoindex]->codec->extradata[i + 8];
 		}
 
 		for (int i = 0; i < pps_size_; i++)
 		{
-			pps_[i] = ifmt_ctx->streams[0]->codec->extradata[i + 8 + 2 + 1 + sps_size_];
+			pps_[i] = ifmt_ctx->streams[videoindex]->codec->extradata[i + 8 + 2 + 1 + sps_size_];
 		}
+#else
+		sps_size_ = 36;
+		pps_size_ = 4;
+		//sps_size_ = ifmt_ctx->streams[videoindex]->codec->extradata[6] * 0xFF + ifmt_ctx->streams[videoindex]->codec->extradata[7];
+		//pps_size_ = ifmt_ctx->streams[videoindex]->codec->extradata[8 + sps_size_ + 1] * 0xFF + ifmt_ctx->streams[videoindex]->codec->extradata[8 + sps_size_ + 2];
+		for (int i = 0; i < 36; i++)
+		{
+			sps_[i] = ifmt_ctx->streams[videoindex]->codec->extradata[i + 4];
+			printf("%x ,", sps_[i]);
+		}
+
+		for (int i = 0; i < 4; i++)
+		{
+			pps_[i] = ifmt_ctx->streams[videoindex]->codec->extradata[i + 36 + 8];
+			printf("%x ,", pps_[i]);
+		}
+#endif
 		///////////////////////////////set encode///////////////////////////////////////////
 		break;
 	}
@@ -649,7 +669,7 @@ int main(int argc, char* argv[])
 		}
 	}
 
-	live_264size_ = 1280 * 720 * 2;
+	live_264size_ = 1920 * 1080 * 2;
 	
 	//Write file header
 	ret = avformat_write_header(ofmt_ctx, NULL);
@@ -844,15 +864,18 @@ void SendVideoData(char* buf, int bufLen, unsigned int timestamp, bool isKeyfram
 
 int SendH264Packet(unsigned char *data, unsigned int size, int bIsKeyFrame, unsigned int nTimeStamp);
 
+int sp_time = 0;
 void frame_info(void/*AVPacket* avpacket,int videoindex*/)
 {
 	
 	while (1)
 	{
-		//Sleep(6000);
+		//Sleep(10000);
 		//continue;
 		if (video_frame_list_.empty())
 			continue;
+		//	if(video_frame_list_.size() < 30)
+					
 		for (std::list<AVFrame *>::iterator it = video_frame_list_.begin(); it != video_frame_list_.end(); ++it)
 		{
 			//if (it->flags != ) continue;
@@ -946,22 +969,30 @@ void frame_info(void/*AVPacket* avpacket,int videoindex*/)
 						//AVFrame *src_frame_= av_frame_alloc();
 						AVFrame *yuv_frame_ = av_frame_alloc();
 				
-						int live_yuvsize_ = 1280 * 720 * 3 / 2;
+						int live_yuvsize_ = 1920 * 1080 * 3 / 2;
 						char* live_yuvbuf_ = new char[live_yuvsize_];
 
 						avpicture_fill((AVPicture *)yuv_frame_, (uint8_t*)live_yuvbuf_,
-							PIX_FMT_YUV420P, 1280, 720);
+							AV_PIX_FMT_YUV420P, 1920, 1080);
 
 						SwsContext *sws_ctx_ = sws_getContext(1920, 1080, AV_PIX_FMT_YUV420P,
-							1280, 720, AV_PIX_FMT_YUV420P,
+							1920, 1080, AV_PIX_FMT_YUV420P,
 							SWS_BICUBIC, 0, 0, 0);
 						sws_scale(sws_ctx_, avs_frame->data, avs_frame->linesize, 0,
-							720, yuv_frame_->data, yuv_frame_->linesize);
+							1080, yuv_frame_->data, yuv_frame_->linesize);
 
 
 
 						int outlen = live_264size_;
 
+
+						if (sp_time == 25)
+						{
+							isKeyframe = true;
+							sp_time = 0;
+						}
+						sp_time++;
+						
 						char* nalbuf = x264_encoder_->Encode((unsigned char*)live_yuvbuf_,
 							(unsigned char*)live_264buf_, outlen, isKeyframe);
 
@@ -994,8 +1025,8 @@ void frame_info(void/*AVPacket* avpacket,int videoindex*/)
 						if (nalbuf)
 							//SendVideoData(nalbuf, outlen, timestamp, isKeyframe);
 							SendH264Packet((unsigned char*)nalbuf, outlen, isKeyframe, timestamp);
-						//isKeyframe = false;
-						Sleep(100);
+						
+						
 						delete live_yuvbuf_;
 						
 						//free(nalbuf);
@@ -1022,8 +1053,13 @@ void frame_info(void/*AVPacket* avpacket,int videoindex*/)
 
 #endif
 						//Sleep(200);
-						isKeyframe = false;
+						//isKeyframe = false;
 						timestamp += 40;
+						if (0)
+							isKeyframe = true;
+						else
+							isKeyframe = false;
+						Sleep(40);
 						if (video_frame_list_.empty())
 							return;
 						//delete out_buffer;
@@ -1044,6 +1080,7 @@ void frame_info(void/*AVPacket* avpacket,int videoindex*/)
 					//av_frame_free(&avs_frame);
 					//av_frame_free(&avs_YUVframe);
 				}
+				//return;
 
 		}
 }
@@ -1068,6 +1105,9 @@ int SendPacket(unsigned int nPacketType, unsigned char *data, unsigned int size,
 
 int SendH264Packet(unsigned char *data, unsigned int size, int bIsKeyFrame, unsigned int nTimeStamp)
 {
+	
+	
+
 	if (data == NULL && size < 11){
 		return false;
 	}
@@ -1171,8 +1211,10 @@ int SendVideoSpsPps(unsigned char *pps, int pps_len, unsigned char * sps, int sp
 	free(packet);    //释放内存
 	return nRet;
 }
+
 int SendPacket(unsigned int nPacketType, unsigned char *data, unsigned int size, unsigned int nTimestamp)
 {
+	
 	RTMPPacket* packet;
 	/*分配包内存和初始化,len为包体长度*/
 	packet = (RTMPPacket *)malloc(RTMP_HEAD_SIZE + size);
@@ -1181,6 +1223,7 @@ int SendPacket(unsigned int nPacketType, unsigned char *data, unsigned int size,
 	packet->m_body = (char *)packet + RTMP_HEAD_SIZE;
 	packet->m_nBodySize = size;
 	memcpy(packet->m_body, data, size);
+	//packet->m_nTimeStamp = nTimestamp;
 	packet->m_hasAbsTimestamp = 0;
 	packet->m_packetType = nPacketType; /*此处为类型有两种一种是音频,一种是视频*/
 	packet->m_nInfoField2 = rtmp->m_stream_id;

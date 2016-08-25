@@ -131,6 +131,9 @@ char* X264Encoder::Encode(unsigned char* szYUVFrame, unsigned char* outBuf,
 {
 
 	char* ret_264buf = NULL;
+	/*memcpy(picture_.img.plane[0], szYUVFrame, param_.i_width * param_.i_height * 3 / 2);
+	memcpy(picture_.img.plane[1], szYUVFrame + param_.i_width * param_.i_height * 3 / 2, param_.i_width * param_.i_height * 3 / 2);
+	memcpy(picture_.img.plane[2], szYUVFrame + param_.i_width * param_.i_height * 3 , param_.i_width * param_.i_height * 3 / 2);*/
 
 	picture_.img.plane[0] = szYUVFrame;
 	picture_.img.plane[1] = szYUVFrame + param_.i_width*param_.i_height;
