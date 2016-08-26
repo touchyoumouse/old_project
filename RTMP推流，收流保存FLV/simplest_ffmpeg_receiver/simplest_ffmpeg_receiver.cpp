@@ -347,7 +347,7 @@ int init_RTMP(char * stream_url_)
 	err = RTMP_ConnectStream(rtmp, 0);
 	if (err <= 0) return false;
 
-	rtmp->m_outChunkSize = 1024 * 1024;
+	rtmp->m_outChunkSize = 4 * 1024 * 1024;
 	SendSetChunkSize(rtmp->m_outChunkSize);
 }
 void SendSetChunkSize(unsigned int chunkSize)
@@ -428,14 +428,14 @@ char* UI24ToBytes(char* buf, hb_uint24 val)
 
 void SendAVCSequenceHeaderPacket()
 {
-	RTMPPacket * packet = NULL;//rtmp包结构
-	unsigned char * body = NULL;
-	//int i;
-	packet = (RTMPPacket *)malloc(RTMP_HEAD_SIZE + 1024);
-	//RTMPPacket_Reset(packet);//重置packet状态
-	memset(packet, 0, RTMP_HEAD_SIZE + 1024);
-	packet->m_body = (char *)packet + RTMP_HEAD_SIZE;
-	body = (unsigned char *)packet->m_body;
+	//RTMPPacket * packet = NULL;//rtmp包结构
+	//unsigned char * body = NULL;
+	////int i;
+	//packet = (RTMPPacket *)malloc(RTMP_HEAD_SIZE + 1024);
+	////RTMPPacket_Reset(packet);//重置packet状态
+	//memset(packet, 0, RTMP_HEAD_SIZE + 1024);
+	//packet->m_body = (char *)packet + RTMP_HEAD_SIZE;
+	//body = (unsigned char *)packet->m_body;
 
 
 
@@ -468,17 +468,17 @@ void SendAVCSequenceHeaderPacket()
 	memcpy(pbuf, pps_, pps_size_);
 	pbuf += pps_size_;
 
-	packet->m_body = pbuf;
+	/*packet->m_body = pbuf;
 	packet->m_packetType = RTMP_PACKET_TYPE_VIDEO;
 	packet->m_nBodySize = (int)(pbuf - avc_seq_buf);
 	packet->m_nChannel = 0x04;
 	packet->m_nTimeStamp = 0;
 	packet->m_hasAbsTimestamp = 0;
 	packet->m_headerType = RTMP_PACKET_SIZE_MEDIUM;
-	packet->m_nInfoField2 = rtmp->m_stream_id;
-	int nRet = RTMP_SendPacket(rtmp, packet, TRUE);
-	free(packet);    //释放内存
-	//Send(avc_seq_buf, (int)(pbuf - avc_seq_buf), 0x09, 0);
+	packet->m_nInfoField2 = rtmp->m_stream_id;*/
+	//int nRet = RTMP_SendPacket(rtmp, packet, TRUE);
+	//free(packet);    //释放内存
+	Send(avc_seq_buf, (int)(pbuf - avc_seq_buf), 0x09, 0);
 }
 
 #include <process.h> /* _beginthread, _endthread */
@@ -874,8 +874,8 @@ void frame_info(void/*AVPacket* avpacket,int videoindex*/)
 		//continue;
 		if (video_frame_list_.empty())
 			continue;
-		//	if(video_frame_list_.size() < 30)
-					
+		if (video_frame_list_.size() < 40)
+			continue;
 		for (std::list<AVFrame *>::iterator it = video_frame_list_.begin(); it != video_frame_list_.end(); ++it)
 		{
 			//if (it->flags != ) continue;
@@ -1021,10 +1021,10 @@ void frame_info(void/*AVPacket* avpacket,int videoindex*/)
 						fflush(testfile);
 						fclose(testfile);
 						*/
-#if X264_MODE
+#if X264_MODE			
 						if (nalbuf)
 							//SendVideoData(nalbuf, outlen, timestamp, isKeyframe);
-							SendH264Packet((unsigned char*)nalbuf, outlen, isKeyframe, timestamp);
+							 SendH264Packet((unsigned char*)nalbuf, outlen, isKeyframe, timestamp);
 						
 						
 						delete live_yuvbuf_;
@@ -1054,12 +1054,12 @@ void frame_info(void/*AVPacket* avpacket,int videoindex*/)
 #endif
 						//Sleep(200);
 						//isKeyframe = false;
-						timestamp += 40;
+						timestamp += 50;
 						if (0)
 							isKeyframe = true;
 						else
 							isKeyframe = false;
-						Sleep(40);
+						Sleep(50);
 						if (video_frame_list_.empty())
 							return;
 						//delete out_buffer;
@@ -1080,7 +1080,7 @@ void frame_info(void/*AVPacket* avpacket,int videoindex*/)
 					//av_frame_free(&avs_frame);
 					//av_frame_free(&avs_YUVframe);
 				}
-				//return;
+				return;
 
 		}
 }
@@ -1154,7 +1154,7 @@ int SendH264Packet(unsigned char *data, unsigned int size, int bIsKeyFrame, unsi
 	int bRet = SendPacket(RTMP_PACKET_TYPE_VIDEO, body, i + size, nTimeStamp);
 
 	free(body);
-
+	body = NULL;
 	return bRet;
 }
 
@@ -1164,6 +1164,8 @@ int SendVideoSpsPps(unsigned char *pps, int pps_len, unsigned char * sps, int sp
 	RTMPPacket * packet = NULL;//rtmp包结构
 	unsigned char * body = NULL;
 	int i;
+	//RTMPPacket_Alloc(packet, RTMP_HEAD_SIZE + 1024);
+	//RTMPPacket_Reset(packet);
 	packet = (RTMPPacket *)malloc(RTMP_HEAD_SIZE + 1024);
 	//RTMPPacket_Reset(packet);//重置packet状态
 	memset(packet, 0, RTMP_HEAD_SIZE + 1024);
@@ -1207,8 +1209,14 @@ int SendVideoSpsPps(unsigned char *pps, int pps_len, unsigned char * sps, int sp
 	packet->m_nInfoField2 = rtmp->m_stream_id;
 
 	/*调用发送接口*/
-	int nRet = RTMP_SendPacket(rtmp, packet, TRUE);
-	free(packet);    //释放内存
+	int nRet = RTMP_SendPacket(rtmp, packet, FALSE);
+	if (packet != NULL){
+	//	free(packet->m_body);
+	//	packet->m_body = NULL;
+		free(packet);
+		packet = NULL;
+	}
+	//free(packet);    //释放内存
 	return nRet;
 }
 
@@ -1216,6 +1224,9 @@ int SendPacket(unsigned int nPacketType, unsigned char *data, unsigned int size,
 {
 	
 	RTMPPacket* packet;
+
+	//RTMPPacket_Alloc(packet, RTMP_HEAD_SIZE + size);
+	//RTMPPacket_Reset(packet);
 	/*分配包内存和初始化,len为包体长度*/
 	packet = (RTMPPacket *)malloc(RTMP_HEAD_SIZE + size);
 	memset(packet, 0, RTMP_HEAD_SIZE);
@@ -1239,9 +1250,13 @@ int SendPacket(unsigned int nPacketType, unsigned char *data, unsigned int size,
 	int nRet = 0;
 	if (RTMP_IsConnected(rtmp))
 	{
-		nRet = RTMP_SendPacket(rtmp, packet, TRUE); /*TRUE为放进发送队列,FALSE是不放进发送队列,直接发送*/
+		nRet = RTMP_SendPacket(rtmp, packet, FALSE); /*TRUE为放进发送队列,FALSE是不放进发送队列,直接发送*/
 	}
 	/*释放内存*/
+	//RTMPPacket_Free(packet);
+	//free(packet->m_body);
+	//packet->m_body = NULL;
 	free(packet);
+	packet = NULL;
 	return nRet;
 }
