@@ -185,6 +185,18 @@ char* X264Encoder::Encode(unsigned char* szYUVFrame, unsigned char* outBuf,
 		outLen = i_frame_size;
 	}
 #endif
+#define _X264_PPSSPS_PRISE 1
+#if   _X264_PPSSPS_PRISE
+
+
+
+#else
+
+#endif
+
+
+
+
 
 	isKeyframe = (pic_out.i_type == X264_TYPE_IDR);
 

@@ -221,6 +221,7 @@
 #include <deque>
 #include <vector>
 #include <list>
+#include <map>
 #define __STDC_CONSTANT_MACROS
 
 #ifdef _WIN32
@@ -246,6 +247,12 @@ extern "C" {
 #include "librtmp/rtmp.h"
 #include "librtmp/rtmp_sys.h"
 
+#include "Lock.h"
+
+
+
+base::Lock mtx_;
+
 typedef INT8 hb_int8;
 typedef INT16 hb_int16;
 typedef INT32 hb_int24;
@@ -264,6 +271,19 @@ int timestamp = 0;
 std::list<AVFrame*> video_frame_list_;
 
 //FILE *fpSave = fopen("geth264.h264", "ab");
+
+
+//parse sps and pps
+	void FindSpsAndPPsFromBuf(const char* dataBuf, int bufLen);
+	static void ff_avc_parse_nal_units(const char *bufIn, int inSize, char* bufOut, int* outSize);
+	static const char *ff_avc_find_startcode(const char *p, const char *end);
+	static const char *ff_avc_find_startcode_internal(const char *p, const char *end);
+	void ParseH264Frame(const char* nalsbuf, int size, char* outBuf, int& outLen,
+		char* spsBuf, int& spsSize, char* ppsBuf, int& ppsSize,
+		bool& isKeyframe, int* pwidth, int* pheight);
+	void AVCParseNalUnits(const char *bufIn, int inSize, char* bufOut, int* outSize);
+	const char* AVCFindStartCode(const char *p, const char *end);
+	const char* AVCFindStartCodeInternal(const char *p, const char *end);
 
 
 char* UI32ToBytes(char* buf, hb_uint32 val)
@@ -301,9 +321,11 @@ extern "C"
 #endif
 void SendSetChunkSize(unsigned int chunkSize);
 std::deque<AVPacket* > video_bufs_cache;
+std::map<int, char*> video_sendrtmp_map;
 //'1': Use H.264 Bitstream Filter 
 #define USE_H264BSF 1
 void frame_info();
+void send_frame();
 bool isKeyframe = false;
 AVCodecContext* ff_codec_ctx_;
 AVCodec *pCodec;
@@ -319,6 +341,12 @@ int live_264size_;
 void beginthread_fun(void *a)
 {
 	frame_info();
+	return;
+}
+
+void beginthread_send_fun(void *a)
+{
+	send_frame();
 	return;
 }
 
@@ -425,7 +453,27 @@ char* UI24ToBytes(char* buf, hb_uint24 val)
 	return pbuf;
 }
 #define RTMP_HEAD_SIZE   (sizeof(RTMPPacket)+RTMP_MAX_HEADER_SIZE)
+bool CopySend(const char* buf, int bufLen, int type, unsigned int timestamp)
+{
 
+	RTMPPacket rtmp_pakt;
+	RTMPPacket_Reset(&rtmp_pakt);
+	RTMPPacket_Alloc(&rtmp_pakt, bufLen);
+
+	rtmp_pakt.m_packetType = type;
+	rtmp_pakt.m_nBodySize = bufLen;
+	rtmp_pakt.m_nTimeStamp = timestamp;
+	rtmp_pakt.m_nChannel = 4;
+	rtmp_pakt.m_headerType = RTMP_PACKET_SIZE_LARGE;
+	rtmp_pakt.m_nInfoField2 = rtmp->m_stream_id;
+
+	memcpy(rtmp_pakt.m_body, buf, bufLen);
+
+	int retval = RTMP_SendPacket(rtmp, &rtmp_pakt, 0);
+	RTMPPacket_Free(&rtmp_pakt);
+
+	return !!retval;
+}
 void SendAVCSequenceHeaderPacket()
 {
 	//RTMPPacket * packet = NULL;//rtmp包结构
@@ -436,7 +484,6 @@ void SendAVCSequenceHeaderPacket()
 	//memset(packet, 0, RTMP_HEAD_SIZE + 1024);
 	//packet->m_body = (char *)packet + RTMP_HEAD_SIZE;
 	//body = (unsigned char *)packet->m_body;
-
 
 
 	char avc_seq_buf[4096];
@@ -468,17 +515,7 @@ void SendAVCSequenceHeaderPacket()
 	memcpy(pbuf, pps_, pps_size_);
 	pbuf += pps_size_;
 
-	/*packet->m_body = pbuf;
-	packet->m_packetType = RTMP_PACKET_TYPE_VIDEO;
-	packet->m_nBodySize = (int)(pbuf - avc_seq_buf);
-	packet->m_nChannel = 0x04;
-	packet->m_nTimeStamp = 0;
-	packet->m_hasAbsTimestamp = 0;
-	packet->m_headerType = RTMP_PACKET_SIZE_MEDIUM;
-	packet->m_nInfoField2 = rtmp->m_stream_id;*/
-	//int nRet = RTMP_SendPacket(rtmp, packet, TRUE);
-	//free(packet);    //释放内存
-	Send(avc_seq_buf, (int)(pbuf - avc_seq_buf), 0x09, 0);
+	CopySend(avc_seq_buf, (int)(pbuf - avc_seq_buf), 0x09, 0);
 }
 
 #include <process.h> /* _beginthread, _endthread */
@@ -514,7 +551,7 @@ int main(int argc, char* argv[])
 
 	AVDictionary* ffoptions = NULL;
 	av_dict_set(&ffoptions, "rtsp_transport", "tcp", 0);
-	av_dict_set(&ffoptions, "fflags", "nobuffer", 0);
+	//av_dict_set(&ffoptions, "fflags", "nobuffer", 0);
 	in_filename = "rtsp://192.168.1.175/0/888888:888888/main";
 
 	rtmp_url = "rtmp://127.0.0.1/live/123";
@@ -567,7 +604,7 @@ int main(int argc, char* argv[])
 		{
 			pps_[i] = ifmt_ctx->streams[videoindex]->codec->extradata[i + 8 + 2 + 1 + sps_size_];
 		}
-#else
+#elseif 0
 		sps_size_ = 36;
 		pps_size_ = 4;
 		//sps_size_ = ifmt_ctx->streams[videoindex]->codec->extradata[6] * 0xFF + ifmt_ctx->streams[videoindex]->codec->extradata[7];
@@ -621,23 +658,25 @@ int main(int argc, char* argv[])
 			//avcodec_find_encoder(ifmt_ctx->streams[i]->codec->codec_id);
 
 			AVCodec *pCodec1 = avcodec_find_encoder(AV_CODEC_ID_H264);
-			ff_encodec_ctx_ = avcodec_alloc_context3(pCodec1);
+			//ff_encodec_ctx_ = avcodec_alloc_context3(pCodec1);
+			//
+			//{
+			//	/* put sample parameters */
+			//	ff_encodec_ctx_->bit_rate = 400000;
+			//	/* resolution must be a multiple of two */
+			//	ff_encodec_ctx_->width = ff_codec_ctx_->width;
+			//	ff_encodec_ctx_->height = ff_codec_ctx_->height;
+			//	/* frames per second */
+			//	ff_encodec_ctx_->time_base.den = 90000;
+			//	ff_encodec_ctx_->time_base.num = 1;
+			//	ff_encodec_ctx_->gop_size = 10; /* emit one intra frame every ten frames */
+			//	//ff_encodec_ctx_->max_b_frames = 1;
+			//	ff_encodec_ctx_->pix_fmt = AV_PIX_FMT_YUV420P;
+			//	av_opt_set(ff_encodec_ctx_->priv_data, "preset", "superfast", 0);
+			//	av_opt_set(ff_encodec_ctx_->priv_data, "tune", "zerolatency", 0);
+			//}
+			ff_encodec_ctx_ = ifmt_ctx->streams[videoindex]->codec;
 
-			{
-				/* put sample parameters */
-				ff_encodec_ctx_->bit_rate = 400000;
-				/* resolution must be a multiple of two */
-				ff_encodec_ctx_->width = ff_codec_ctx_->width;
-				ff_encodec_ctx_->height = ff_codec_ctx_->height;
-				/* frames per second */
-				ff_encodec_ctx_->time_base.den = 25;
-				ff_encodec_ctx_->time_base.num = 1;
-				ff_encodec_ctx_->gop_size = 10; /* emit one intra frame every ten frames */
-				ff_encodec_ctx_->max_b_frames = 1;
-				ff_encodec_ctx_->pix_fmt = AV_PIX_FMT_YUV420P;
-				av_opt_set(ff_encodec_ctx_->priv_data, "preset", "superfast", 0);
-				av_opt_set(ff_encodec_ctx_->priv_data, "tune", "zerolatency", 0);
-			}
 			if (avcodec_open2(ff_codec_ctx_, pCodec, NULL) < 0)
 			{
 				int a = 1;
@@ -681,7 +720,8 @@ int main(int argc, char* argv[])
 	//进入读取程序
 	
 	_beginthread(beginthread_fun, 0, NULL);
-#if USE_H264BSF
+	_beginthread(beginthread_send_fun, 0, NULL);
+#if USE_H264BSF 
 	AVBitStreamFilterContext* h264bsfc = av_bitstream_filter_init("h264_mp4toannexb");
 #endif
 	int num = 0;
@@ -689,7 +729,7 @@ int main(int argc, char* argv[])
 #define SAVE_H264_FILE 0
 #if SAVE_H264_FILE
 	FILE *fpSave;
-	if ((fpSave = fopen("mytest333.h264", "ab")) == NULL) //h264保存的文件名  
+	if ((fpSave = fopen("mytest123456.h264", "ab")) == NULL) //h264保存的文件名  
 		return 0;
 	unsigned char *dummy = NULL;   //输入的指针  
 	int dummy_len;
@@ -734,6 +774,8 @@ int main(int argc, char* argv[])
 #endif
 	//////////////////////////////////////////////////////////////////////////
 	isKeyframe = true;
+	int avpacket_num = 0;
+	bool has_got_keyframe = false;
 	while (1) {
 		AVStream *in_stream, *out_stream;
 		//Get an AVPacket
@@ -747,9 +789,15 @@ int main(int argc, char* argv[])
 		//if (pkt.flags != CODEC_ID_NONE)
 		if (pkt.stream_index == videoindex)
 		{
+				if (false == has_got_keyframe)
+				{
+				  has_got_keyframe = (pkt.flags & AV_PKT_FLAG_KEY);
+				}
+				
+			//if (pkt.flags & AV_PKT_FLAG_KEY)
 			if ((pkt.size > 0) && (pkt.flags & AV_PKT_FLAG_KEY))
 			{
-				double duration = pkt.duration * 1000.0 / ff_codec_ctx_->time_base.den;
+				double duration = pkt.duration * 1000.0 / ifmt_ctx->streams[videoindex]->time_base.den;
 
 				AVFrame*  avs_frame;
 				
@@ -759,8 +807,9 @@ int main(int argc, char* argv[])
 				//decode
 				int num = 0;
 				int av_num = avcodec_decode_video2(ff_codec_ctx_, avs_frame, &num, &pkt);
-				if (avs_frame->pict_type != AV_PICTURE_TYPE_NONE)
-				{
+				
+				//if (avs_frame->pict_type != AV_PICTURE_TYPE_NONE)
+				//{
 					AVFrame*  avs_YUVframe;
 					avs_YUVframe = av_frame_alloc();
 					out_buffer = new uint8_t[avpicture_get_size(AV_PIX_FMT_YUV420P, ff_codec_ctx_->width, ff_codec_ctx_->height)];
@@ -769,46 +818,43 @@ int main(int argc, char* argv[])
 					img_convert_ctx = sws_getContext(ff_codec_ctx_->width, ff_codec_ctx_->height, ff_codec_ctx_->pix_fmt, ff_codec_ctx_->width, ff_codec_ctx_->height, AV_PIX_FMT_YUV420P, SWS_BICUBIC, NULL, NULL, NULL);
 					sws_scale(img_convert_ctx, avs_frame->data, avs_frame->linesize, 0, ff_codec_ctx_->height, avs_YUVframe->data, avs_YUVframe->linesize);
 
+					base::AutoLock al(mtx_);
 					video_frame_list_.push_back(avs_YUVframe);
 
 					//av_frame_free(&avs_YUVframe);
-				}
-				
+				//}
+				printf("avpacket num = %d\n", avpacket_num++);
+				//video_frame_list_.push_back(avs_frame);
 				av_frame_free(&avs_frame);
 			}
 		}
 //////////////////////////////////////////////////////////////////////////
-		in_stream = ifmt_ctx->streams[pkt.stream_index];
-		out_stream = ofmt_ctx->streams[pkt.stream_index];
-		/* copy packet */
-		//Convert PTS/DTS
-		pkt.pts = av_rescale_q_rnd(pkt.pts, in_stream->time_base, out_stream->time_base, (AVRounding)(AV_ROUND_NEAR_INF | AV_ROUND_PASS_MINMAX));
-		pkt.dts = av_rescale_q_rnd(pkt.dts, in_stream->time_base, out_stream->time_base, (AVRounding)(AV_ROUND_NEAR_INF | AV_ROUND_PASS_MINMAX));
-		pkt.duration = av_rescale_q(pkt.duration, in_stream->time_base, out_stream->time_base);
-		pkt.pos = -1;
-		//Print to Screen
-		if (pkt.stream_index == videoindex){
-			printf("Receive %8d video frames from input URL\n", frame_index);
-			frame_index++;
-
-#if USE_H264BSF
-			av_bitstream_filter_filter(h264bsfc, in_stream->codec, NULL, &pkt.data, &pkt.size, pkt.data, pkt.size, 0);
-#endif
-		}
-		//ret = av_write_frame(ofmt_ctx, &pkt);
-		ret = av_interleaved_write_frame(ofmt_ctx, &pkt);
-
-		if (ret < 0) {
-			printf("Error muxing packet\n");
-			break;
-		}
+//		in_stream = ifmt_ctx->streams[pkt.stream_index];
+//		out_stream = ofmt_ctx->streams[pkt.stream_index];
+//		/* copy packet */
+//		//Convert PTS/DTS
+//		pkt.pts = av_rescale_q_rnd(pkt.pts, in_stream->time_base, out_stream->time_base, (AVRounding)(AV_ROUND_NEAR_INF | AV_ROUND_PASS_MINMAX));
+//		pkt.dts = av_rescale_q_rnd(pkt.dts, in_stream->time_base, out_stream->time_base, (AVRounding)(AV_ROUND_NEAR_INF | AV_ROUND_PASS_MINMAX));
+//		pkt.duration = av_rescale_q(pkt.duration, in_stream->time_base, out_stream->time_base);
+//		pkt.pos = -1;
+//		//Print to Screen
+//		if (pkt.stream_index == videoindex){
+//			printf("Receive %8d video frames from input URL\n", frame_index);
+//			frame_index++;
+//
+//#if USE_H264BSF
+//			av_bitstream_filter_filter(h264bsfc, in_stream->codec, NULL, &pkt.data, &pkt.size, pkt.data, pkt.size, 0);
+//#endif
+//		}
+//		//ret = av_write_frame(ofmt_ctx, &pkt);
+//		ret = av_interleaved_write_frame(ofmt_ctx, &pkt);
+//
+//		if (ret < 0) {
+//			printf("Error muxing packet\n");
+//			break;
+//		}
 
 		av_free_packet(&pkt);
-		num++;
-		if (num == 1000)
-		{
-			//		break;
-		}
 	}
 
 #if USE_H264BSF
@@ -865,21 +911,22 @@ void SendVideoData(char* buf, int bufLen, unsigned int timestamp, bool isKeyfram
 int SendH264Packet(unsigned char *data, unsigned int size, int bIsKeyFrame, unsigned int nTimeStamp);
 
 int sp_time = 0;
+
 void frame_info(void/*AVPacket* avpacket,int videoindex*/)
 {
-	
+	int frame_num = 0;
 	while (1)
 	{
 		//Sleep(10000);
-		//continue;
+	    // continue;
 		if (video_frame_list_.empty())
 			continue;
-		if (video_frame_list_.size() < 40)
-			continue;
+		//if (video_frame_list_.size() < 100)
+			//continue;
 		for (std::list<AVFrame *>::iterator it = video_frame_list_.begin(); it != video_frame_list_.end(); ++it)
 		{
 			//if (it->flags != ) continue;
-			
+			base::AutoLock al(mtx_);
 			AVFrame*  avs_frame;
 			avs_frame = av_frame_alloc();
 			avs_frame = *it;
@@ -931,12 +978,12 @@ void frame_info(void/*AVPacket* avpacket,int videoindex*/)
 
 
 					//int pktsize = avpacket->size;
-					int keyframe = avs_frame->key_frame;
-					int width = avs_frame->width;
-					int hight = avs_frame->height;
-					printf("keyframe = %d \ n", keyframe);
-					printf("width = %d \n", width);
-					printf("hight = %d \n", hight);
+					//int keyframe = avs_frame->key_frame;
+					//int width = avs_frame->width;
+					//int hight = avs_frame->height;
+					printf("frame_num =  %d  \n", frame_num++);
+					printf("timestamp = %d \n\n", timestamp);
+					//printf("hight = %d \n", hight);
 					//printf("pktsize = %d \n", pktsize);
 
 					{
@@ -983,8 +1030,8 @@ void frame_info(void/*AVPacket* avpacket,int videoindex*/)
 
 
 
-						int outlen = live_264size_;
-
+						//int outlen = live_264size_;
+						int outlen = 0;
 
 						if (sp_time == 25)
 						{
@@ -996,7 +1043,21 @@ void frame_info(void/*AVPacket* avpacket,int videoindex*/)
 						char* nalbuf = x264_encoder_->Encode((unsigned char*)live_yuvbuf_,
 							(unsigned char*)live_264buf_, outlen, isKeyframe);
 
-						
+						char *parse_buf = (char*)malloc(outlen + 1024 + 18);
+						int x264_len_ = 0;
+
+
+
+						if (sps_size_ == 0 || pps_size_ == 0)
+						{
+							//is_first = true;
+							ParseH264Frame(nalbuf, outlen, parse_buf + 5 + 18, x264_len_, sps_, sps_size_, pps_, pps_size_, isKeyframe, NULL, NULL);
+						}
+						else
+						{
+							ParseH264Frame(nalbuf,outlen,parse_buf+5+18,x264_len_,NULL,sps_size_,NULL,pps_size_,isKeyframe,NULL,NULL);
+						}
+						//ParseH264Frame(nalbuf,outlen,parse_buf+5+18,x264_len_,sps_,sps_size_,pps_,pps_size_,isKeyframe,NULL,NULL);
 #else			
 						AVPacket av_pakt;
 						av_init_packet(&av_pakt);
@@ -1022,11 +1083,21 @@ void frame_info(void/*AVPacket* avpacket,int videoindex*/)
 						fclose(testfile);
 						*/
 #if X264_MODE			
+
 						if (nalbuf)
 							//SendVideoData(nalbuf, outlen, timestamp, isKeyframe);
-							 SendH264Packet((unsigned char*)nalbuf, outlen, isKeyframe, timestamp);
+							SendH264Packet((unsigned char*)nalbuf, outlen, isKeyframe, timestamp);
 						
-						
+						//video_sendrtmp_map.insert(std::map<int, char*>::value_type(outlen,nalbuf));
+						//if (video_sendrtmp_map.size() > 20)
+						//{
+							//std::map<int, char*>::iterator iter = video_sendrtmp_map.begin();
+							//free(iter->second);
+							//iter->second = NULL;
+							//video_sendrtmp_map.erase(video_sendrtmp_map.begin());
+							//video_sendrtmp_map.
+						//}
+					
 						delete live_yuvbuf_;
 						
 						//free(nalbuf);
@@ -1054,12 +1125,12 @@ void frame_info(void/*AVPacket* avpacket,int videoindex*/)
 #endif
 						//Sleep(200);
 						//isKeyframe = false;
-						timestamp += 50;
+						timestamp += 150;
 						if (0)
 							isKeyframe = true;
 						else
 							isKeyframe = false;
-						Sleep(50);
+						Sleep(0);
 						if (video_frame_list_.empty())
 							return;
 						//delete out_buffer;
@@ -1080,12 +1151,26 @@ void frame_info(void/*AVPacket* avpacket,int videoindex*/)
 					//av_frame_free(&avs_frame);
 					//av_frame_free(&avs_YUVframe);
 				}
-				return;
+				//return;
 
 		}
 }
 
-
+void send_frame(void/*AVPacket* avpacket,int videoindex*/)
+{
+	while (1)
+	{
+		std::map<int, char*>::iterator  iter;
+		
+		for (iter = video_sendrtmp_map.begin(); iter != video_sendrtmp_map.end(); iter++)
+		{
+			base::AutoLock al(mtx_);
+			SendH264Packet((unsigned char*)iter->second, iter->first, isKeyframe, timestamp);
+			Sleep(0);
+		}
+	}
+	
+}
 
 
 
@@ -1260,3 +1345,235 @@ int SendPacket(unsigned int nPacketType, unsigned char *data, unsigned int size,
 	packet = NULL;
 	return nRet;
 }
+
+
+
+
+//parse pps and sps
+
+inline unsigned int BytesToUI32(const char* buf)
+{
+	return ((((unsigned int)buf[0]) << 24) & 0xff000000)
+		| ((((unsigned int)buf[1]) << 16) & 0xff0000)
+		| ((((unsigned int)buf[2]) << 8) & 0xff00)
+		| ((((unsigned int)buf[3])) & 0xff);
+}
+#define _USE_RTMTLIVE555_PARSE_FUN_ 0
+#if _USE_RTMTLIVE555_PARSE_FUN_
+
+
+void FindSpsAndPPsFromBuf(const char* dataBuf, int bufLen)
+{
+	char* tmp_buf = new char[bufLen];
+	int tmp_len = 0;
+
+	ff_avc_parse_nal_units(dataBuf, bufLen, tmp_buf, &tmp_len);
+
+	char* start = tmp_buf;
+	char* end = tmp_buf + tmp_len;
+
+	/* look for sps and pps */
+	while (start < end)
+	{
+		unsigned int size = BytesToUI32(start);
+		unsigned char nal_type = start[4] & 0x1f;
+
+		if (nal_type == 7)        /* SPS */
+		{
+			sps_size_ = size;
+			sps_ = (char*)malloc(sps_size_);
+			memcpy(sps_, start + 4, sps_size_);
+		}
+		else if (nal_type == 8)   /* PPS */
+		{
+			pps_size_ = size;
+			pps_ = (char*)malloc(pps_size_);
+			memcpy(pps_, start + 4, pps_size_);
+		}
+		start += size + 4;
+	}
+
+	delete[] tmp_buf;
+}
+
+static void ff_avc_parse_nal_units(const char *bufIn, int inSize, char* bufOut, int* outSize)
+{
+	const char *p = bufIn;
+	const char *end = p + inSize;
+	const char *nal_start, *nal_end;
+
+	char* pbuf = bufOut;
+
+	*outSize = 0;
+	nal_start = ff_avc_find_startcode(p, end);
+	while (nal_start < end)
+	{
+		while (!*(nal_start++));
+
+		nal_end = ff_avc_find_startcode(nal_start, end);
+
+		unsigned int nal_size = nal_end - nal_start;
+		pbuf = UI32ToBytes(pbuf, nal_size);
+		memcpy(pbuf, nal_start, nal_size);
+		pbuf += nal_size;
+
+		nal_start = nal_end;
+	}
+
+	*outSize = (pbuf - bufOut);
+}
+
+static const char *ff_avc_find_startcode(const char *p, const char *end)
+{
+	const char *out = ff_avc_find_startcode_internal(p, end);
+	if (p < out && out < end && !out[-1]) out--;
+	return out;
+}
+
+static const char *ff_avc_find_startcode_internal(const char *p, const char *end)
+{
+	const char *a = p + 4 - ((intptr_t)p & 3);
+
+	for (end -= 3; p < a && p < end; p++) {
+		if (p[0] == 0 && p[1] == 0 && p[2] == 1)
+			return p;
+	}
+
+	for (end -= 3; p < end; p += 4) {
+		unsigned int x = *(const unsigned int*)p;
+		      if ((x - 0x01000100) & (~x) & 0x80008000) // little endian
+		      if ((x - 0x00010001) & (~x) & 0x00800080) // big endian
+		if ((x - 0x01010101) & (~x) & 0x80808080) { // generic
+			if (p[1] == 0) {
+				if (p[0] == 0 && p[2] == 1)
+					return p;
+				if (p[2] == 0 && p[3] == 1)
+					return p + 1;
+			}
+			if (p[3] == 0) {
+				if (p[2] == 0 && p[4] == 1)
+					return p + 2;
+				if (p[4] == 0 && p[5] == 1)
+					return p + 3;
+			}
+		}
+	}
+
+	for (end += 3; p < end; p++) {
+		if (p[0] == 0 && p[1] == 0 && p[2] == 1)
+			return p;
+	}
+
+	return end + 3;
+}
+
+#else
+
+/////////////////////////////便携录播方式/////////////////////////////////////////////
+void ParseH264Frame(const char* nalsbuf, int size, char* outBuf, int& outLen,
+	char* spsBuf, int& spsSize, char* ppsBuf, int& ppsSize,
+	bool& isKeyframe, int* pwidth, int* pheight)
+{
+	int tmp_len = 0;
+
+	AVCParseNalUnits(nalsbuf, size, (char*)outBuf, &outLen);
+
+	char* start = outBuf;
+	char* end = outBuf + outLen;
+
+	/* look for sps and pps */
+	while (start < end)
+	{
+		unsigned int size = BytesToUI32(start);
+		unsigned char nal_type = start[4] & 0x1f;
+
+		if (nal_type == 7 && spsBuf)        /* SPS */
+		{
+			spsSize = size;
+			memcpy(spsBuf, start + 4, spsSize);
+
+			//ff_h264_decode_sps(start + 4, size, pwidth, pheight);
+		}
+		else if (nal_type == 8 && ppsBuf)   /* PPS */
+		{
+			ppsSize = size;
+			memcpy(ppsBuf, start + 4, ppsSize);
+		}
+		else if (nal_type == 5)
+		{
+			isKeyframe = true;
+		}
+		start += size + 4;
+	}
+}
+
+void AVCParseNalUnits(const char *bufIn, int inSize, char* bufOut, int* outSize)
+{
+	const char *p = bufIn;
+	const char *end = p + inSize;
+	const char *nal_start, *nal_end;
+
+	char* pbuf = bufOut;
+
+	*outSize = 0;
+	nal_start = AVCFindStartCode(p, end);
+	while (nal_start < end)
+	{
+		while (!*(nal_start++));
+
+		nal_end = AVCFindStartCode(nal_start, end);
+
+		unsigned int nal_size = nal_end - nal_start;
+		pbuf = UI32ToBytes(pbuf, nal_size);
+		memcpy(pbuf, nal_start, nal_size);
+		pbuf += nal_size;
+
+		nal_start = nal_end;
+	}
+
+	*outSize = (pbuf - bufOut);
+}
+const char* AVCFindStartCode(const char *p, const char *end)
+{
+	const char *out = AVCFindStartCodeInternal(p, end);
+	if (p < out && out < end && !out[-1]) out--;
+	return out;
+}
+
+const char* AVCFindStartCodeInternal(const char *p, const char *end)
+{
+	const char *a = p + 4 - ((intptr_t)p & 3);
+
+	for (end -= 3; p < a && p < end; p++) {
+		if (p[0] == 0 && p[1] == 0 && p[2] == 1)
+			return p;
+	}
+
+	for (end -= 3; p < end; p += 4) {
+		unsigned int x = *(const unsigned int*)p;
+		//      if ((x - 0x01000100) & (~x) & 0x80008000) // little endian
+		//      if ((x - 0x00010001) & (~x) & 0x00800080) // big endian
+		if ((x - 0x01010101) & (~x) & 0x80808080) { // generic
+			if (p[1] == 0) {
+				if (p[0] == 0 && p[2] == 1)
+					return p;
+				if (p[2] == 0 && p[3] == 1)
+					return p + 1;
+			}
+			if (p[3] == 0) {
+				if (p[2] == 0 && p[4] == 1)
+					return p + 2;
+				if (p[4] == 0 && p[5] == 1)
+					return p + 3;
+			}
+		}
+	}
+
+	for (end += 3; p < end; p++) {
+		if (p[0] == 0 && p[1] == 0 && p[2] == 1)
+			return p;
+	}
+
+	return end + 3;
+}
+#endif
