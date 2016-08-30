@@ -711,11 +711,11 @@ int main(int argc, char* argv[])
 	live_264size_ = 1920 * 1080 * 2;
 	
 	//Write file header
-	ret = avformat_write_header(ofmt_ctx, NULL);
-	if (ret < 0) {
-		printf("Error occurred when opening output URL\n");
-		goto end;
-	}
+	//ret = avformat_write_header(ofmt_ctx, NULL);
+	//if (ret < 0) {
+	//	printf("Error occurred when opening output URL\n");
+	//	goto end;
+	//}
 
 	//进入读取程序
 	
@@ -779,6 +779,7 @@ int main(int argc, char* argv[])
 	while (1) {
 		AVStream *in_stream, *out_stream;
 		//Get an AVPacket
+		av_init_packet(&pkt);
 		ret = av_read_frame(ifmt_ctx, &pkt);
 		if (ret < 0)
 			break;
@@ -795,7 +796,7 @@ int main(int argc, char* argv[])
 				}
 				
 			//if (pkt.flags & AV_PKT_FLAG_KEY)
-			if ((pkt.size > 0) && (pkt.flags & AV_PKT_FLAG_KEY))
+				if ((pkt.size > 0) && has_got_keyframe/*(pkt.flags & AV_PKT_FLAG_KEY)*/)
 			{
 				double duration = pkt.duration * 1000.0 / ifmt_ctx->streams[videoindex]->time_base.den;
 
@@ -812,7 +813,7 @@ int main(int argc, char* argv[])
 				//{
 					AVFrame*  avs_YUVframe;
 					avs_YUVframe = av_frame_alloc();
-					out_buffer = new uint8_t[avpicture_get_size(AV_PIX_FMT_YUV420P, ff_codec_ctx_->width, ff_codec_ctx_->height)];
+			    	out_buffer = new uint8_t[avpicture_get_size(AV_PIX_FMT_YUV420P, ff_codec_ctx_->width, ff_codec_ctx_->height)];
 					avpicture_fill((AVPicture *)avs_YUVframe, (uint8_t*)out_buffer, AV_PIX_FMT_YUV420P, ff_codec_ctx_->width, ff_codec_ctx_->height);
 					struct SwsContext * img_convert_ctx;
 					img_convert_ctx = sws_getContext(ff_codec_ctx_->width, ff_codec_ctx_->height, ff_codec_ctx_->pix_fmt, ff_codec_ctx_->width, ff_codec_ctx_->height, AV_PIX_FMT_YUV420P, SWS_BICUBIC, NULL, NULL, NULL);
@@ -820,7 +821,13 @@ int main(int argc, char* argv[])
 
 					base::AutoLock al(mtx_);
 					video_frame_list_.push_back(avs_YUVframe);
-
+					if (video_frame_list_.size() > 250)
+					{
+					//	std::list<AVFrame *>::iterator it = video_frame_list_.begin();
+					//	av_frame_free(&*it);
+						//video_frame_list_.pop_front();
+					//	video_frame_list_.erase(it);
+					}
 					//av_frame_free(&avs_YUVframe);
 				//}
 				printf("avpacket num = %d\n", avpacket_num++);
@@ -914,17 +921,25 @@ int sp_time = 0;
 
 void frame_info(void/*AVPacket* avpacket,int videoindex*/)
 {
+	std::list<AVFrame *>::iterator it;
 	int frame_num = 0;
+	Sleep(4000);
 	while (1)
 	{
-		//Sleep(10000);
+		
 	    // continue;
 		if (video_frame_list_.empty())
 			continue;
 		//if (video_frame_list_.size() < 100)
 			//continue;
-		for (std::list<AVFrame *>::iterator it = video_frame_list_.begin(); it != video_frame_list_.end(); ++it)
+
+		for (it = video_frame_list_.begin(); it != video_frame_list_.end(); it++)
 		{
+			/*if (video_frame_list_.size() > 100)
+			{
+			av_frame_free(&*video_frame_list_.begin());
+			video_frame_list_.pop_front();
+			}*/
 			//if (it->flags != ) continue;
 			base::AutoLock al(mtx_);
 			AVFrame*  avs_frame;
@@ -1035,7 +1050,7 @@ void frame_info(void/*AVPacket* avpacket,int videoindex*/)
 
 						if (sp_time == 25)
 						{
-							isKeyframe = true;
+							//isKeyframe = true;
 							sp_time = 0;
 						}
 						sp_time++;
@@ -1125,12 +1140,14 @@ void frame_info(void/*AVPacket* avpacket,int videoindex*/)
 #endif
 						//Sleep(200);
 						//isKeyframe = false;
-						timestamp += 150;
+						timestamp += 40;
 						if (0)
 							isKeyframe = true;
 						else
 							isKeyframe = false;
 						Sleep(0);
+						//av_frame_free(&avs_frame);
+						//video_frame_list_.pop_front();
 						if (video_frame_list_.empty())
 							return;
 						//delete out_buffer;
