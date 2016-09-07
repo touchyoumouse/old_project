@@ -60,7 +60,8 @@ int main(int argc, char* argv[])
 	//in_filename  = "cuc_ieschool.mp4";
 	//in_filename  = "cuc_ieschool.h264";
 	//in_filename  = "cuc_ieschool.flv";// ‰»ÎURL£®Input file URL£©
-	in_filename  = "rtsp://192.168.1.176/0/888888:888888/main";
+	in_filename  = "rtmp://live.hkstv.hk.lxdns.com/live/hks";
+	//in_filename  = "rtsp://192.168.1.176/0/888888:888888/main";
 	//in_filename  = "shanghai03_p.h264";
 	
 	out_filename = "rtmp://58.132.10.201:1942/ece_sta_live/1234";// ‰≥ˆ URL£®Output URL£©[RTMP]
@@ -75,7 +76,7 @@ int main(int argc, char* argv[])
 	av_dict_set(&ffoptions, "rtsp_transport", "tcp", 0);
 	av_dict_set(&ffoptions, "fflags", "nobuffer", 0);
 
-	if ((ret = avformat_open_input(&ifmt_ctx, in_filename, 0, &ffoptions)) < 0) {
+	if ((ret = avformat_open_input(&ifmt_ctx, in_filename, 0, NULL/*&ffoptions*/)) < 0) {
 		printf( "Could not open input file.");
 		goto end;
 	}
@@ -84,6 +85,7 @@ int main(int argc, char* argv[])
 		goto end;
 	}
 
+	int num_stream = ifmt_ctx->nb_streams;
 	for(i=0; i<ifmt_ctx->nb_streams; i++) 
 		if(ifmt_ctx->streams[i]->codec->codec_type==AVMEDIA_TYPE_VIDEO){
 			videoindex=i;
