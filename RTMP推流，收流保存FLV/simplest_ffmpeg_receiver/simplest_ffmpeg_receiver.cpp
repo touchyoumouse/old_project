@@ -241,6 +241,10 @@ extern "C" {
 #include "libavcodec/avcodec.h"
 #include "libswresample/swresample.h"
 #include "libavutil/opt.h"
+
+	//SDL
+#include "sdl/SDL.h"
+#include "sdl/SDL_thread.h"
 }
 
 extern "C" {
@@ -980,14 +984,36 @@ int SendH264Packet(unsigned char *data, unsigned int size, int bIsKeyFrame, unsi
 
 int sp_time = 0;
 
+
 void frame_info(void/*AVPacket* avpacket,int videoindex*/)
 {
-	
+
+
+	//SDL----------------------------
+	if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_TIMER)) {
+		printf("Could not initialize SDL - %s\n", SDL_GetError());
+		//return;
+	}
+	int screen_w = 0, screen_h = 0;
+	SDL_Surface *screen;
+	screen_w = 640/*ff_codec_ctx_->width*/;
+	screen_h = 480/*ff_codec_ctx_->height*/;
+	screen = SDL_SetVideoMode(screen_w, screen_h, 0, 0);
+
+	if (!screen) {
+		printf("SDL: could not set video mode - exiting:%s\n", SDL_GetError());
+		//return;
+	}
+	SDL_Overlay *bmp;
+	bmp = SDL_CreateYUVOverlay(ff_codec_ctx_->width, ff_codec_ctx_->height, SDL_YV12_OVERLAY, screen);
+	SDL_Rect rect;
+	//SDL End------------------------
+
+
 	int frame_num = 0;
 	Sleep(5000);
 	while (1)
 	{
-		
 		//continue;
 		if (video_frame_list_.empty())
 			continue;
@@ -1020,7 +1046,6 @@ void frame_info(void/*AVPacket* avpacket,int videoindex*/)
 			struct SwsContext * img_convert_ctx;
 			img_convert_ctx = sws_getContext(ff_codec_ctx_->width, ff_codec_ctx_->height, ff_codec_ctx_->pix_fmt, ff_codec_ctx_->width, ff_codec_ctx_->height, AV_PIX_FMT_YUV420P, SWS_BICUBIC, NULL, NULL, NULL);
 			sws_scale(img_convert_ctx, avs_frame->data, avs_frame->linesize, 0, ff_codec_ctx_->height, avs_YUVframe->data, avs_YUVframe->linesize);*/
-		
 			
 			//AVFrame*  avs_frame = *it;
 #define USE_IT_ 0
@@ -1036,8 +1061,6 @@ void frame_info(void/*AVPacket* avpacket,int videoindex*/)
 
 			}
 #endif
-
-
 #define SAVE_PICTURE 0
 #if  SAVE_PICTURE
 
@@ -1089,7 +1112,6 @@ void frame_info(void/*AVPacket* avpacket,int videoindex*/)
 					//uint8_t *buf = (uint8_t *)malloc(*avs_frame->pkt_size);
 					//avcodec_encode_video(ff_encodec_ctx_, buf, *avs_frame->linesize, avs_frame);
 
-
 					//int pktsize = avpacket->size;
 					//int keyframe = avs_frame->key_frame;
 					//int width = avs_frame->width;
@@ -1098,7 +1120,6 @@ void frame_info(void/*AVPacket* avpacket,int videoindex*/)
 					printf("timestamp = %d \n\n", timestamp);
 					//printf("hight = %d \n", hight);
 					//printf("pktsize = %d \n", pktsize);
-
 					{
 						//int num = 1;
 						//FILE *testfile = fopen("test2.rgb", "wb");
@@ -1115,8 +1136,6 @@ void frame_info(void/*AVPacket* avpacket,int videoindex*/)
 						//////////////////////////////////////////////////////////////////////////
 #define X264_MODE 1
 #if X264_MODE
-
-
 						/*
 								live_264buf_ = new char[live_264size_];
 								avpicture_fill((AVPicture *)live_264buf_, (uint8_t*)avs_frame,
@@ -1127,29 +1146,45 @@ void frame_info(void/*AVPacket* avpacket,int videoindex*/)
 								sws_scale(sws_ctx_, avs_frame->data, avs_frame->linesize, 0,
 								height_, live_264buf_, live_264size_);*/
 						//AVFrame *src_frame_= av_frame_alloc();
-
 						AVFrame *yuv_frame_ = av_frame_alloc();
-
 						//base::AutoLock al(write_mtx_);
 						int live_yuvsize_ = 1920 * 1080 * 3 / 2;
 						char* live_yuvbuf_ = new char[live_yuvsize_];
-
 						avpicture_fill((AVPicture *)yuv_frame_, (uint8_t*)live_yuvbuf_,
 							AV_PIX_FMT_YUV420P, 1920, 1080);
-
 						SwsContext *sws_ctx_ = sws_getContext(1920, 1080, AV_PIX_FMT_YUV420P,
 							1920, 1080, AV_PIX_FMT_YUV420P,
 							SWS_BICUBIC, 0, 0, 0);
-						//base::AutoLock al(write_mtx_);
-						
+						//base::AutoLock al(write_mtx_);	
 						sws_scale(sws_ctx_, avs_frame->data, avs_frame->linesize, 0,
 							1080, yuv_frame_->data, yuv_frame_->linesize);
 						write_mtx_.Release();
 
+						//SDL-----------------------
+						SDL_LockYUVOverlay(bmp);
+						bmp->pixels[0] = yuv_frame_->data[0];
+						bmp->pixels[2] = yuv_frame_->data[1];
+						bmp->pixels[1] = yuv_frame_->data[2];
+						bmp->pitches[0] = yuv_frame_->linesize[0];
+						bmp->pitches[2] = yuv_frame_->linesize[1];
+						bmp->pitches[1] = yuv_frame_->linesize[2];
+						SDL_UnlockYUVOverlay(bmp);
+						rect.x = 0;
+						rect.y = 0;
+						rect.w = 640;
+						rect.h = 480;
+						SDL_DisplayYUVOverlay(bmp, &rect);
+						//Delay 40ms
+						SDL_Delay(40);
+
+						//SDL-----------------------
+
+
+
+
 
 						//int outlen = live_264size_;
 						int outlen = 0;
-
 						if (sp_time == 25)
 						{
 							//isKeyframe = true;
@@ -1162,8 +1197,6 @@ void frame_info(void/*AVPacket* avpacket,int videoindex*/)
 
 						char *parse_buf = (char*)malloc(outlen + 1024 + 18);
 						int x264_len_ = 0;
-
-
 
 						if (sps_size_ == 0 || pps_size_ == 0)
 						{
@@ -1200,7 +1233,6 @@ void frame_info(void/*AVPacket* avpacket,int videoindex*/)
 						fclose(testfile);
 						*/
 #if X264_MODE			
-
 						if (nalbuf)
 							//SendVideoData(nalbuf, outlen, timestamp, isKeyframe);
 							SendH264Packet((unsigned char*)nalbuf, outlen, isKeyframe, timestamp);
@@ -1223,17 +1255,14 @@ void frame_info(void/*AVPacket* avpacket,int videoindex*/)
 						//video_frame_list_.pop_front();
 						av_frame_free(&yuv_frame_);
 						//av_frame_free(&avs_YUVframe);
-						//delete out_buffer;
-						
+						//delete out_buffer;					
 						//av_frame_free(&avs_frame);
 						//avs_frame = NULL;
 						//bufpool.FreeBuf((char *)avs_frame);
-						if (!video_frame_list_.empty())
+						//if (!video_frame_list_.empty())
 							//video_frame_list_.pop_front();
 							//delete nalbuf;
-
 							//nalbuf = NULL;
-
 #else									
 						if (av_pakt.data)
 						{
@@ -1280,8 +1309,7 @@ void frame_info(void/*AVPacket* avpacket,int videoindex*/)
 						//fflush(testfile);
 						//fclose(testfile);
 					}
-					/*	}*/
-					
+					/*	}*/				
 					//char *video_frame = new char(avpacket->size);
 					//video_bufs_cache.push_back(video_frame);
 					//av_frame_free(&avs_frame);
@@ -1291,7 +1319,6 @@ void frame_info(void/*AVPacket* avpacket,int videoindex*/)
 			
 		}
 }
-
 //void send_frame_info(AVFrame* avs_frame,int videoindex)
 //{
 //		//base::AutoLock al(write_mtx_);
