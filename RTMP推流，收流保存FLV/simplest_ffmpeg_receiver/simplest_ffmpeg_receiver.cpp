@@ -216,12 +216,15 @@
 * It's the simplest FFmpeg stream receiver.
 *
 */
+#include "service_buffer.h"
 #include "encodec.h"
 #include <stdio.h>
 #include <deque>
 #include <vector>
 #include <list>
 #include <map>
+
+#include "../mempool/BufPool.h"
 #define __STDC_CONSTANT_MACROS
 
 #ifdef _WIN32
@@ -268,7 +271,7 @@ int sps_size_;
 char* pps_;        // picture parameter set
 int pps_size_;
 int timestamp = 0;
-std::list<AVFrame*> video_frame_list_;
+std::deque<AVFrame*> video_frame_list_;
 
 //FILE *fpSave = fopen("geth264.h264", "ab");
 
@@ -325,6 +328,7 @@ std::map<int, char*> video_sendrtmp_map;
 //'1': Use H.264 Bitstream Filter 
 #define USE_H264BSF 1
 void frame_info();
+void send_frame_info(AVFrame* avs_frame, int videoindex);
 void send_frame();
 bool isKeyframe = false;
 AVCodecContext* ff_codec_ctx_;
@@ -520,9 +524,14 @@ void SendAVCSequenceHeaderPacket()
 
 #include <process.h> /* _beginthread, _endthread */
 
+
+base::Lock write_mtx_;
+std::deque<AVFrame *>::iterator it;
+CBufPool bufpool(1920 * 1080, 500);
 int main(int argc, char* argv[])
 {
 
+	
 	{
 		//x264
 		x264_encoder_ = new X264Encoder();
@@ -531,9 +540,9 @@ int main(int argc, char* argv[])
 
 
 
+	AVFrameCache avframecache;
 
-
-	av_log_set_callback(my_logoutput);
+ 	av_log_set_callback(my_logoutput);
 	sps_ = new char[1024];
 	sps_size_ = 0;
 	pps_ = new char[1024];
@@ -552,7 +561,7 @@ int main(int argc, char* argv[])
 	AVDictionary* ffoptions = NULL;
 	av_dict_set(&ffoptions, "rtsp_transport", "tcp", 0);
 	//av_dict_set(&ffoptions, "fflags", "nobuffer", 0);
-	in_filename = "rtsp://192.168.1.175/0/888888:888888/main";
+	in_filename = "rtsp://192.168.1.127/0/888888:888888/main";
 
 	rtmp_url = "rtmp://127.0.0.1/live/123";
 	init_RTMP(rtmp_url);
@@ -627,6 +636,7 @@ int main(int argc, char* argv[])
 
 	av_dump_format(ifmt_ctx, 0, in_filename, 0);
 
+	
 	//Output
 	// avformat_alloc_output_context2()函数可以初始化一个用于输出的AVFormatContext结构体
 	avformat_alloc_output_context2(&ofmt_ctx, NULL, NULL, out_filename); //RTMP
@@ -720,7 +730,7 @@ int main(int argc, char* argv[])
 	//进入读取程序
 	
 	_beginthread(beginthread_fun, 0, NULL);
-	_beginthread(beginthread_send_fun, 0, NULL);
+	//_beginthread(beginthread_send_fun, 0, NULL);
 #if USE_H264BSF 
 	AVBitStreamFilterContext* h264bsfc = av_bitstream_filter_init("h264_mp4toannexb");
 #endif
@@ -777,26 +787,25 @@ int main(int argc, char* argv[])
 	int avpacket_num = 0;
 	bool has_got_keyframe = false;
 	while (1) {
+		AVPacket pkt;
 		AVStream *in_stream, *out_stream;
 		//Get an AVPacket
 		av_init_packet(&pkt);
 		ret = av_read_frame(ifmt_ctx, &pkt);
 		if (ret < 0)
 			break;
-//////////////////////////////////////////////////////////////////////////
-		
+//////////////////////////////////////////////////////////////////////////		
 		 //video_bufs_cache.push_back(&pkt);
 		//frame_info(&pkt,videoindex)
 		//if (pkt.flags != CODEC_ID_NONE)
 		if (pkt.stream_index == videoindex)
 		{
-				if (false == has_got_keyframe)
-				{
-				  has_got_keyframe = (pkt.flags & AV_PKT_FLAG_KEY);
-				}
-				
+			if (false == has_got_keyframe)
+			{
+				has_got_keyframe = (pkt.flags & AV_PKT_FLAG_KEY);
+			}
 			//if (pkt.flags & AV_PKT_FLAG_KEY)
-				if ((pkt.size > 0) && has_got_keyframe/*(pkt.flags & AV_PKT_FLAG_KEY)*/)
+			if (pkt.size > 0 && has_got_keyframe/*(pkt.flags & AV_PKT_FLAG_KEY)*/)
 			{
 				double duration = pkt.duration * 1000.0 / ifmt_ctx->streams[videoindex]->time_base.den;
 
@@ -804,35 +813,88 @@ int main(int argc, char* argv[])
 				
 				avs_frame = av_frame_alloc();
 				
-				uint8_t *out_buffer;
+				//uint8_t *out_buffer;
 				//decode
 				int num = 0;
 				int av_num = avcodec_decode_video2(ff_codec_ctx_, avs_frame, &num, &pkt);
 				
-				//if (avs_frame->pict_type != AV_PICTURE_TYPE_NONE)
-				//{
-					AVFrame*  avs_YUVframe;
-					avs_YUVframe = av_frame_alloc();
-			    	out_buffer = new uint8_t[avpicture_get_size(AV_PIX_FMT_YUV420P, ff_codec_ctx_->width, ff_codec_ctx_->height)];
-					avpicture_fill((AVPicture *)avs_YUVframe, (uint8_t*)out_buffer, AV_PIX_FMT_YUV420P, ff_codec_ctx_->width, ff_codec_ctx_->height);
-					struct SwsContext * img_convert_ctx;
-					img_convert_ctx = sws_getContext(ff_codec_ctx_->width, ff_codec_ctx_->height, ff_codec_ctx_->pix_fmt, ff_codec_ctx_->width, ff_codec_ctx_->height, AV_PIX_FMT_YUV420P, SWS_BICUBIC, NULL, NULL, NULL);
-					sws_scale(img_convert_ctx, avs_frame->data, avs_frame->linesize, 0, ff_codec_ctx_->height, avs_YUVframe->data, avs_YUVframe->linesize);
+				if (avs_frame->pict_type == AV_PICTURE_TYPE_NONE)
+				{
+					av_free_packet(&pkt);
+					continue;
+				}
+				av_free_packet(&pkt);
+				/*AVFrame*  avs_YUVframe;
+				avs_YUVframe = av_frame_alloc();
+				out_buffer = new uint8_t[avpicture_get_size(AV_PIX_FMT_YUV420P, ff_codec_ctx_->width, ff_codec_ctx_->height)];
+				avpicture_fill((AVPicture *)avs_YUVframe, (uint8_t*)out_buffer, AV_PIX_FMT_YUV420P, ff_codec_ctx_->width, ff_codec_ctx_->height);
+				struct SwsContext * img_convert_ctx;
+				img_convert_ctx = sws_getContext(ff_codec_ctx_->width, ff_codec_ctx_->height, ff_codec_ctx_->pix_fmt, ff_codec_ctx_->width, ff_codec_ctx_->height, AV_PIX_FMT_YUV420P, SWS_BICUBIC, NULL, NULL, NULL);
+				sws_scale(img_convert_ctx, avs_frame->data, avs_frame->linesize, 0, ff_codec_ctx_->height, avs_YUVframe->data, avs_YUVframe->linesize);
+				avs_YUVframe->pict_type = avs_frame->pict_type;*/
+					
+#define USE_VIDEO_FRAME_LIST 0
+#if     USE_VIDEO_FRAME_LIST
 
-					base::AutoLock al(mtx_);
-					video_frame_list_.push_back(avs_YUVframe);
-					if (video_frame_list_.size() > 250)
+					if (video_frame_list_.empty())
 					{
-					//	std::list<AVFrame *>::iterator it = video_frame_list_.begin();
-					//	av_frame_free(&*it);
+						video_frame_list_.push_back(avs_YUVframe);
+						it = video_frame_list_.begin();
+					}
+					else
+					{
+						//Sleep(40);
+						video_frame_list_.push_back(avs_YUVframe);
+					}
+
+					//it = video_frame_list_.begin();
+					if (video_frame_list_.size() > 500)
+					{
+					    std::deque<AVFrame *>::iterator it = video_frame_list_.begin();
+						av_frame_free(&video_frame_list_.front());
+						video_frame_list_.pop_front();
 						//video_frame_list_.pop_front();
-					//	video_frame_list_.erase(it);
+					    //	video_frame_list_.erase(it);
+						//Sleep(100);
+						printf("%d\n", video_frame_list_.size());
 					}
 					//av_frame_free(&avs_YUVframe);
 				//}
+#endif
+					//Sleep(40);
+					//if (avs_YUVframe == NULL);
+					//AVFrame* frame_ = (AVFrame*)bufpool.NewBuf();
+					//frame_ = avs_YUVframe;
+					//if ((avs_YUVframe == NULL) || (avs_YUVframe->type < 0) || (avs_YUVframe->width == 1980))
+					//	continue;
+					AVFrame* frame_ = avframecache.MallocAndCopyAVFrame(avs_frame);
+					//memcpy(frame_, avs_YUVframe,sizeof(*avs_YUVframe));
+					printf("456");
+					base::AutoLock al(write_mtx_);
+					write_mtx_.Acquire();
+					video_frame_list_.push_back(frame_);
+					write_mtx_.Release();
+					//send_frame_info(avs_YUVframe, 0);
+					if (video_frame_list_.size() >= 25)
+					{
+						AVFrame* del_frame = video_frame_list_.front();
+						avframecache.FreeAVFrame(del_frame);
+						video_frame_list_.pop_front();
+						//delete del_frame;
+					//	del_frame = NULL;
+					}
+					//delete out_buffer;
 				printf("avpacket num = %d\n", avpacket_num++);
 				//video_frame_list_.push_back(avs_frame);
 				av_frame_free(&avs_frame);
+				//av_frame_free(&frame_);
+				//av_frame_free(&avs_YUVframe);
+				//free(out_buffer);
+				//out_buffer = NULL;
+				//av_free_packet(&pkt);
+				//AVFrame *free_char = video_frame_list_.front();
+				//bufpool.FreeBuf((char *)free_char);
+				//video_frame_list_.pop_front();
 			}
 		}
 //////////////////////////////////////////////////////////////////////////
@@ -860,9 +922,8 @@ int main(int argc, char* argv[])
 //			printf("Error muxing packet\n");
 //			break;
 //		}
-
-		av_free_packet(&pkt);
-	}
+		//av_free_packet(&pkt);
+}
 
 #if USE_H264BSF
 	//av_bitstream_filter_close(h264bsfc);
@@ -921,34 +982,65 @@ int sp_time = 0;
 
 void frame_info(void/*AVPacket* avpacket,int videoindex*/)
 {
-	std::list<AVFrame *>::iterator it;
+	
 	int frame_num = 0;
-	Sleep(4000);
+	Sleep(5000);
 	while (1)
 	{
 		
-	    // continue;
+		//continue;
 		if (video_frame_list_.empty())
 			continue;
 		//if (video_frame_list_.size() < 100)
-			//continue;
+		//continue;
 
-		for (it = video_frame_list_.begin(); it != video_frame_list_.end(); it++)
+		//for (std::deque<AVFrame* >::iterator it = video_frame_list_.begin(); it != video_frame_list_.end(); ++it)
 		{
+			//Sleep(100);
 			/*if (video_frame_list_.size() > 100)
 			{
 			av_frame_free(&*video_frame_list_.begin());
 			video_frame_list_.pop_front();
 			}*/
+			//if (video_frame_list_.empty())
+			//continue;
 			//if (it->flags != ) continue;
-			base::AutoLock al(mtx_);
-			AVFrame*  avs_frame;
+			//it = video_frame_list_.front();
+			//base::AutoLock al(mtx_);
+			//base::AutoLock al(write_mtx_);
+			write_mtx_.Acquire();
+			//printf("123");
+			AVFrame*  avs_frame = video_frame_list_.front(); 
+
+			/*uint8_t *out_buffer;
+			AVFrame*  avs_YUVframe;
+			avs_YUVframe = av_frame_alloc();
+			out_buffer = new uint8_t[avpicture_get_size(AV_PIX_FMT_YUV420P, ff_codec_ctx_->width, ff_codec_ctx_->height)];
+			avpicture_fill((AVPicture *)avs_YUVframe, (uint8_t*)out_buffer, AV_PIX_FMT_YUV420P, ff_codec_ctx_->width, ff_codec_ctx_->height);
+			struct SwsContext * img_convert_ctx;
+			img_convert_ctx = sws_getContext(ff_codec_ctx_->width, ff_codec_ctx_->height, ff_codec_ctx_->pix_fmt, ff_codec_ctx_->width, ff_codec_ctx_->height, AV_PIX_FMT_YUV420P, SWS_BICUBIC, NULL, NULL, NULL);
+			sws_scale(img_convert_ctx, avs_frame->data, avs_frame->linesize, 0, ff_codec_ctx_->height, avs_YUVframe->data, avs_YUVframe->linesize);*/
+		
+			
+			//AVFrame*  avs_frame = *it;
+#define USE_IT_ 0
+#if  USE_IT_
 			avs_frame = av_frame_alloc();
 			avs_frame = *it;
+			if(it!=video_frame_list_.end())
+			{
+				it++;
+			}
+			else
+			{
+
+			}
+#endif
+
 
 #define SAVE_PICTURE 0
 #if  SAVE_PICTURE
-			
+
 			FILE *testfile = fopen("test5.yuv", "wb");
 			fwrite(avs_frame->data[0], ff_codec_ctx_->width*ff_codec_ctx_->height, 1, testfile);
 			fwrite(avs_frame->data[1], ff_codec_ctx_->width*ff_codec_ctx_->height / 4, 1, testfile);
@@ -982,11 +1074,17 @@ void frame_info(void/*AVPacket* avpacket,int videoindex*/)
 
 #endif
 					//SendAVCSequenceHeaderPacket();
+					//base::AutoLock al(write_mtx_);
+					/*if ((avs_frame == NULL) || (avs_frame->type < 0) || (avs_frame->width == 1980))
+
+					{
+					write_mtx_.Release();
+					continue;
+					}*/
 					if (avs_frame->pict_type == AV_PKT_FLAG_KEY)
 					{
-						//SendAVCSequenceHeaderPacket();
+						SendAVCSequenceHeaderPacket();
 						isKeyframe = true;
-
 					}
 					//uint8_t *buf = (uint8_t *)malloc(*avs_frame->pkt_size);
 					//avcodec_encode_video(ff_encodec_ctx_, buf, *avs_frame->linesize, avs_frame);
@@ -1017,20 +1115,22 @@ void frame_info(void/*AVPacket* avpacket,int videoindex*/)
 						//////////////////////////////////////////////////////////////////////////
 #define X264_MODE 1
 #if X264_MODE
-						
-						
-					/*
-					        live_264buf_ = new char[live_264size_];
-						    avpicture_fill((AVPicture *)live_264buf_, (uint8_t*)avs_frame,
-							PIX_FMT_YUV420P, 1280, 720);
-							SwsContext *sws_ctx_ = sws_getContext(1920, 1080, AV_PIX_FMT_YUV420P,
-							1280, 720, PIX_FMT_RGB32,
-							SWS_BICUBIC, 0, 0, 0);
-							sws_scale(sws_ctx_, avs_frame->data, avs_frame->linesize, 0,
-							height_, live_264buf_, live_264size_);*/
+
+
+						/*
+								live_264buf_ = new char[live_264size_];
+								avpicture_fill((AVPicture *)live_264buf_, (uint8_t*)avs_frame,
+								PIX_FMT_YUV420P, 1280, 720);
+								SwsContext *sws_ctx_ = sws_getContext(1920, 1080, AV_PIX_FMT_YUV420P,
+								1280, 720, PIX_FMT_RGB32,
+								SWS_BICUBIC, 0, 0, 0);
+								sws_scale(sws_ctx_, avs_frame->data, avs_frame->linesize, 0,
+								height_, live_264buf_, live_264size_);*/
 						//AVFrame *src_frame_= av_frame_alloc();
+
 						AVFrame *yuv_frame_ = av_frame_alloc();
-				
+
+						//base::AutoLock al(write_mtx_);
 						int live_yuvsize_ = 1920 * 1080 * 3 / 2;
 						char* live_yuvbuf_ = new char[live_yuvsize_];
 
@@ -1040,9 +1140,11 @@ void frame_info(void/*AVPacket* avpacket,int videoindex*/)
 						SwsContext *sws_ctx_ = sws_getContext(1920, 1080, AV_PIX_FMT_YUV420P,
 							1920, 1080, AV_PIX_FMT_YUV420P,
 							SWS_BICUBIC, 0, 0, 0);
+						//base::AutoLock al(write_mtx_);
+						
 						sws_scale(sws_ctx_, avs_frame->data, avs_frame->linesize, 0,
 							1080, yuv_frame_->data, yuv_frame_->linesize);
-
+						write_mtx_.Release();
 
 
 						//int outlen = live_264size_;
@@ -1054,7 +1156,7 @@ void frame_info(void/*AVPacket* avpacket,int videoindex*/)
 							sp_time = 0;
 						}
 						sp_time++;
-						
+
 						char* nalbuf = x264_encoder_->Encode((unsigned char*)live_yuvbuf_,
 							(unsigned char*)live_264buf_, outlen, isKeyframe);
 
@@ -1070,7 +1172,7 @@ void frame_info(void/*AVPacket* avpacket,int videoindex*/)
 						}
 						else
 						{
-							ParseH264Frame(nalbuf,outlen,parse_buf+5+18,x264_len_,NULL,sps_size_,NULL,pps_size_,isKeyframe,NULL,NULL);
+							ParseH264Frame(nalbuf, outlen, parse_buf + 5 + 18, x264_len_, NULL, sps_size_, NULL, pps_size_, isKeyframe, NULL, NULL);
 						}
 						//ParseH264Frame(nalbuf,outlen,parse_buf+5+18,x264_len_,sps_,sps_size_,pps_,pps_size_,isKeyframe,NULL,NULL);
 #else			
@@ -1102,28 +1204,35 @@ void frame_info(void/*AVPacket* avpacket,int videoindex*/)
 						if (nalbuf)
 							//SendVideoData(nalbuf, outlen, timestamp, isKeyframe);
 							SendH264Packet((unsigned char*)nalbuf, outlen, isKeyframe, timestamp);
-						
+
 						//video_sendrtmp_map.insert(std::map<int, char*>::value_type(outlen,nalbuf));
 						//if (video_sendrtmp_map.size() > 20)
 						//{
-							//std::map<int, char*>::iterator iter = video_sendrtmp_map.begin();
-							//free(iter->second);
-							//iter->second = NULL;
-							//video_sendrtmp_map.erase(video_sendrtmp_map.begin());
-							//video_sendrtmp_map.
+						//std::map<int, char*>::iterator iter = video_sendrtmp_map.begin();
+						//free(iter->second);
+						//iter->second = NULL;
+						//video_sendrtmp_map.erase(video_sendrtmp_map.begin());
+						//video_sendrtmp_map.
 						//}
-					
+						//sws_freeContext(img_convert_ctx);
+						sws_freeContext(sws_ctx_);
 						delete live_yuvbuf_;
-						
-						//free(nalbuf);
+						delete parse_buf;
+						//free((char *)nalbuf);
 						live_yuvbuf_ = NULL;
 						//video_frame_list_.pop_front();
 						av_frame_free(&yuv_frame_);
+						//av_frame_free(&avs_YUVframe);
+						//delete out_buffer;
+						
 						//av_frame_free(&avs_frame);
-						avs_frame = NULL;
-						
-						
-						//nalbuf = NULL;
+						//avs_frame = NULL;
+						//bufpool.FreeBuf((char *)avs_frame);
+						if (!video_frame_list_.empty())
+							//video_frame_list_.pop_front();
+							//delete nalbuf;
+
+							//nalbuf = NULL;
 
 #else									
 						if (av_pakt.data)
@@ -1145,11 +1254,22 @@ void frame_info(void/*AVPacket* avpacket,int videoindex*/)
 							isKeyframe = true;
 						else
 							isKeyframe = false;
-						Sleep(0);
+						Sleep(40);
 						//av_frame_free(&avs_frame);
 						//video_frame_list_.pop_front();
-						if (video_frame_list_.empty())
-							return;
+						//printf("123");
+						//av_frame_free(&video_frame_list_.front());
+						//video_frame_list_.pop_front();
+						//if (video_frame_list_.size() > 100)
+						//	avs_frame = video_frame_list_.back();
+						//else
+						//{
+						//	//	avs_frame = *it;
+						//	avs_frame = video_frame_list_.front();
+						//	//	++it;
+						//}
+						if (video_frame_list_.empty());
+						//return;
 						//delete out_buffer;
 						//out_buffer = NULL;
 						//delete x264_encoder_;
@@ -1159,19 +1279,122 @@ void frame_info(void/*AVPacket* avpacket,int videoindex*/)
 						fwrite(avs_YUVframe->data[2], ff_codec_ctx_->width*ff_codec_ctx_->height / 4, 1, testfile);*/
 						//fflush(testfile);
 						//fclose(testfile);
-					
 					}
 					/*	}*/
-
+					
 					//char *video_frame = new char(avpacket->size);
 					//video_bufs_cache.push_back(video_frame);
 					//av_frame_free(&avs_frame);
 					//av_frame_free(&avs_YUVframe);
 				}
 				//return;
-
+			
 		}
 }
+
+//void send_frame_info(AVFrame* avs_frame,int videoindex)
+//{
+//		//base::AutoLock al(write_mtx_);
+//		//continue;
+//		if (video_frame_list_.empty())
+//			//AVFrame*  avs_frame = avs_frame;
+//		if ((avs_frame == NULL) || (avs_frame->width == 1980))
+//			return;		
+//		if (avs_frame->pict_type == AV_PKT_FLAG_KEY)
+//		{
+//					isKeyframe = true;
+//
+//		}
+//		//isKeyframe = true;
+//		{
+//	
+//#define X264_MODE 1
+//#if X264_MODE
+//
+//						//SendAVCSequenceHeaderPacket();
+//						AVFrame *yuv_frame_ = av_frame_alloc();
+//
+//						//base::AutoLock al(write_mtx_);
+//						int live_yuvsize_ = 1920 * 1080 * 3 / 2;
+//						char* live_yuvbuf_ = new char[live_yuvsize_];
+//
+//						avpicture_fill((AVPicture *)yuv_frame_, (uint8_t*)live_yuvbuf_,
+//							AV_PIX_FMT_YUV420P, 1920, 1080);
+//
+//						SwsContext *sws_ctx_ = sws_getContext(1920, 1080, AV_PIX_FMT_YUV420P,
+//							1920, 1080, AV_PIX_FMT_YUV420P,
+//							SWS_BICUBIC, 0, 0, 0);
+//						//base::AutoLock al(write_mtx_);
+//						sws_scale(sws_ctx_, avs_frame->data, avs_frame->linesize, 0,
+//							1080, yuv_frame_->data, yuv_frame_->linesize);
+//
+//
+//
+//						//int outlen = live_264size_;
+//						int outlen = 0;
+//
+//						if (sp_time == 25)
+//						{
+//							//isKeyframe = true;
+//							sp_time = 0;
+//						}
+//						sp_time++;
+//
+//						char* nalbuf = x264_encoder_->Encode((unsigned char*)live_yuvbuf_,
+//							(unsigned char*)live_264buf_, outlen, isKeyframe);
+//
+//						char *parse_buf = (char*)malloc(outlen + 1024 + 18);
+//						int x264_len_ = 0;
+//
+//
+//
+//						if (sps_size_ == 0 || pps_size_ == 0)
+//						{
+//							//is_first = true;
+//							ParseH264Frame(nalbuf, outlen, parse_buf + 5 + 18, x264_len_, sps_, sps_size_, pps_, pps_size_, isKeyframe, NULL, NULL);
+//						}
+//						else
+//						{
+//							ParseH264Frame(nalbuf, outlen, parse_buf + 5 + 18, x264_len_, NULL, sps_size_, NULL, pps_size_, isKeyframe, NULL, NULL);
+//						}
+//						//ParseH264Frame(nalbuf,outlen,parse_buf+5+18,x264_len_,sps_,sps_size_,pps_,pps_size_,isKeyframe,NULL,NULL);
+//#else			
+//						AVPacket av_pakt;
+//						av_init_packet(&av_pakt);
+//						av_pakt.size = avpicture_get_size(ff_encodec_ctx_->pix_fmt, ff_encodec_ctx_->width, ff_encodec_ctx_->height);
+//						av_pakt.data = NULL;
+//						int got_packet_ptr = 0;
+//						int anv = avcodec_encode_video2(ff_encodec_ctx_, &av_pakt, avs_frame, &got_packet_ptr);
+//
+//#endif
+//
+//#if X264_MODE			
+//
+//						if (nalbuf)
+//							//SendVideoData(nalbuf, outlen, timestamp, isKeyframe);
+//							SendH264Packet((unsigned char*)nalbuf, outlen, isKeyframe, timestamp);
+//
+//						sws_freeContext(sws_ctx_);
+//						delete live_yuvbuf_;
+//						delete parse_buf;
+//						//free((char *)nalbuf);
+//						live_yuvbuf_ = NULL;
+//						//video_frame_list_.pop_front();
+//						av_frame_free(&yuv_frame_);
+//						//av_frame_free(&avs_frame);
+//						//avs_frame = NULL;
+//						//bufpool.FreeBuf((char *)avs_frame);
+//						if (!video_frame_list_.empty())
+//						timestamp += 40;
+//						if (0)
+//							isKeyframe = true;
+//						else
+//							isKeyframe = false;
+//						Sleep(40);
+//						if (video_frame_list_.empty());
+//#endif
+//					}	
+//}
 
 void send_frame(void/*AVPacket* avpacket,int videoindex*/)
 {

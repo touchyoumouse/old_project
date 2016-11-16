@@ -21,9 +21,36 @@
     <ClCompile Include="encodec.cpp">
       <Filter>源文件</Filter>
     </ClCompile>
+    <ClCompile Include="Lock.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
+    <ClCompile Include="..\mempool\BufPool.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
+    <ClCompile Include="service_buffer.cpp">
+      <Filter>源文件</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="encodec.h">
+      <Filter>源文件</Filter>
+    </ClInclude>
+    <ClInclude Include="Lock.h">
+      <Filter>源文件</Filter>
+    </ClInclude>
+    <ClInclude Include="..\mempool\BufPool.h">
+      <Filter>源文件</Filter>
+    </ClInclude>
+    <ClInclude Include="..\mempool\targetver.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="..\mempool\stdafx.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="DataControl.h">
+      <Filter>源文件</Filter>
+    </ClInclude>
+    <ClInclude Include="service_buffer.h">
       <Filter>源文件</Filter>
     </ClInclude>
   </ItemGroup>

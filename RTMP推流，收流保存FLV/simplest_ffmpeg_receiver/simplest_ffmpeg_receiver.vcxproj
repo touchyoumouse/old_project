@@ -82,11 +82,20 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="..\mempool\BufPool.cpp" />
     <ClCompile Include="encodec.cpp" />
+    <ClCompile Include="Lock.cpp" />
+    <ClCompile Include="service_buffer.cpp" />
     <ClCompile Include="simplest_ffmpeg_receiver.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="..\mempool\BufPool.h" />
+    <ClInclude Include="..\mempool\stdafx.h" />
+    <ClInclude Include="..\mempool\targetver.h" />
+    <ClInclude Include="DataControl.h" />
     <ClInclude Include="encodec.h" />
+    <ClInclude Include="Lock.h" />
+    <ClInclude Include="service_buffer.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

@@ -2,7 +2,8 @@
 #define _LOCK_H_
 
 //#include "Base.h"
-#include <Windows.h>
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
 
 
 #define DISALLOW_COPY_AND_ASSIGN(TypeName) \
