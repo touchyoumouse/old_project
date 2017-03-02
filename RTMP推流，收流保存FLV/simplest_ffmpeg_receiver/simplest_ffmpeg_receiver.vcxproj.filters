@@ -13,6 +13,9 @@
       <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
       <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
     </Filter>
+    <Filter Include="save_file">
+      <UniqueIdentifier>{4eb2cb4d-a39a-43ea-bf71-f917cff064fe}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="simplest_ffmpeg_receiver.cpp">
@@ -29,6 +32,18 @@
     </ClCompile>
     <ClCompile Include="service_buffer.cpp">
       <Filter>源文件</Filter>
+    </ClCompile>
+    <ClCompile Include="savefile.cpp">
+      <Filter>save_file</Filter>
+    </ClCompile>
+    <ClCompile Include="save_file\FFWritter.cpp">
+      <Filter>save_file</Filter>
+    </ClCompile>
+    <ClCompile Include="save_file\ff_reader.cpp">
+      <Filter>save_file</Filter>
+    </ClCompile>
+    <ClCompile Include="libfaad\faac_encoder.cpp">
+      <Filter>save_file</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -52,6 +67,21 @@
     </ClInclude>
     <ClInclude Include="service_buffer.h">
       <Filter>源文件</Filter>
+    </ClInclude>
+    <ClInclude Include="savefile.h">
+      <Filter>save_file</Filter>
+    </ClInclude>
+    <ClInclude Include="save_file\FFWritter.h">
+      <Filter>save_file</Filter>
+    </ClInclude>
+    <ClInclude Include="save_file\TimeCounter.h">
+      <Filter>save_file</Filter>
+    </ClInclude>
+    <ClInclude Include="save_file\ff_reader.h">
+      <Filter>save_file</Filter>
+    </ClInclude>
+    <ClInclude Include="libfaad\faac_encoder.h">
+      <Filter>save_file</Filter>
     </ClInclude>
   </ItemGroup>
 </Project>

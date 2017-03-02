@@ -59,6 +59,7 @@
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <AdditionalLibraryDirectories>lib;E:\tg\stream\RTMP推流，收流保存FLV\simplest_ffmpeg_receiver\include\base_encoder\x264;E:\tg\stream\RTMP推流，收流保存FLV\simplest_ffmpeg_receiver\lib</AdditionalLibraryDirectories>
       <AdditionalDependencies>avcodec.lib;avformat.lib;avutil.lib;avdevice.lib;avfilter.lib;postproc.lib;swresample.lib;swscale.lib;librtmp.lib;ws2_32.lib;libx264-148.lib;SDL.lib;SDLmain.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <IgnoreSpecificDefaultLibraries>libcmtd.lib</IgnoreSpecificDefaultLibraries>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
@@ -84,7 +85,11 @@
   <ItemGroup>
     <ClCompile Include="..\mempool\BufPool.cpp" />
     <ClCompile Include="encodec.cpp" />
+    <ClCompile Include="libfaad\faac_encoder.cpp" />
     <ClCompile Include="Lock.cpp" />
+    <ClCompile Include="savefile.cpp" />
+    <ClCompile Include="save_file\FFWritter.cpp" />
+    <ClCompile Include="save_file\ff_reader.cpp" />
     <ClCompile Include="service_buffer.cpp" />
     <ClCompile Include="simplest_ffmpeg_receiver.cpp" />
   </ItemGroup>
@@ -94,7 +99,12 @@
     <ClInclude Include="..\mempool\targetver.h" />
     <ClInclude Include="DataControl.h" />
     <ClInclude Include="encodec.h" />
+    <ClInclude Include="libfaad\faac_encoder.h" />
     <ClInclude Include="Lock.h" />
+    <ClInclude Include="savefile.h" />
+    <ClInclude Include="save_file\FFWritter.h" />
+    <ClInclude Include="save_file\ff_reader.h" />
+    <ClInclude Include="save_file\TimeCounter.h" />
     <ClInclude Include="service_buffer.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
