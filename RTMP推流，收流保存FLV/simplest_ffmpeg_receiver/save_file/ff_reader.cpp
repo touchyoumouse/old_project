@@ -330,6 +330,8 @@ bool FFReader::FFFindCodecInfo()
         AVStream* audio_stream = ff_fmt_ctx_->streams[audio_stream_index_];
         AVCodecContext* audio_codec_ctx = audio_stream->codec;
 
+	
+
         audio_id_ = audio_codec_ctx->codec_id;
 
         sample_rate_ = audio_codec_ctx->sample_rate;
