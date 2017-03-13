@@ -84,9 +84,11 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="..\mempool\BufPool.cpp" />
+    <ClCompile Include="base\buf_unit_helper.cpp" />
     <ClCompile Include="encodec.cpp" />
     <ClCompile Include="libfaad\faac_encoder.cpp" />
     <ClCompile Include="Lock.cpp" />
+    <ClCompile Include="reader\FAACDecoder.cpp" />
     <ClCompile Include="savefile.cpp" />
     <ClCompile Include="save_file\FFWritter.cpp" />
     <ClCompile Include="save_file\ff_reader.cpp" />
@@ -97,10 +99,13 @@
     <ClInclude Include="..\mempool\BufPool.h" />
     <ClInclude Include="..\mempool\stdafx.h" />
     <ClInclude Include="..\mempool\targetver.h" />
+    <ClInclude Include="base\buf_unit_helper.h" />
+    <ClInclude Include="conver.h" />
     <ClInclude Include="DataControl.h" />
     <ClInclude Include="encodec.h" />
     <ClInclude Include="libfaad\faac_encoder.h" />
     <ClInclude Include="Lock.h" />
+    <ClInclude Include="reader\FAACDecoder.h" />
     <ClInclude Include="savefile.h" />
     <ClInclude Include="save_file\FFWritter.h" />
     <ClInclude Include="save_file\ff_reader.h" />

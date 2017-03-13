@@ -45,6 +45,12 @@
     <ClCompile Include="libfaad\faac_encoder.cpp">
       <Filter>save_file</Filter>
     </ClCompile>
+    <ClCompile Include="reader\FAACDecoder.cpp">
+      <Filter>save_file</Filter>
+    </ClCompile>
+    <ClCompile Include="base\buf_unit_helper.cpp">
+      <Filter>save_file</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="encodec.h">
@@ -81,6 +87,15 @@
       <Filter>save_file</Filter>
     </ClInclude>
     <ClInclude Include="libfaad\faac_encoder.h">
+      <Filter>save_file</Filter>
+    </ClInclude>
+    <ClInclude Include="conver.h">
+      <Filter>save_file</Filter>
+    </ClInclude>
+    <ClInclude Include="reader\FAACDecoder.h">
+      <Filter>save_file</Filter>
+    </ClInclude>
+    <ClInclude Include="base\buf_unit_helper.h">
       <Filter>save_file</Filter>
     </ClInclude>
   </ItemGroup>

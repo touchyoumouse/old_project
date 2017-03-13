@@ -56,8 +56,8 @@ void FAACEncoder::Init(bool isOutAdts, int samRate, int channels,
     enc_cfg->useLfe = 0;
     enc_cfg->useTns = 1;
     //enc_cfg->bitRate = bitrate/channels;
-    enc_cfg->bitRate = 100;
-    enc_cfg->bandWidth = 0;
+    enc_cfg->bitRate = 0;
+    enc_cfg->bandWidth = 5000;
     enc_cfg->quantqual = 100;
     enc_cfg->outputFormat = isOutAdts ? 1 : 0;
     faacEncSetConfiguration(faac_handle_, enc_cfg);

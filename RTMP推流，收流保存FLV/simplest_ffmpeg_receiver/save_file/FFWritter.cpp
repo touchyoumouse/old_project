@@ -164,8 +164,8 @@ void FFWritter::AddAudioStream(int sampleRate, int channelCount, int bitrate /* 
     codec_ctx->codec_id = audio_codec_id_;
     codec_ctx->codec_type = AVMEDIA_TYPE_AUDIO;
 
-    codec_ctx->sample_fmt = AV_SAMPLE_FMT_S16;
-    codec_ctx->bit_rate = 19200/*3000*//*bitrate*/;
+	codec_ctx->sample_fmt = AV_SAMPLE_FMT_S16;
+    codec_ctx->bit_rate = 64000/*3000*//*bitrate*/;
     codec_ctx->sample_rate = sampleRate;
     codec_ctx->channels = channelCount;
 

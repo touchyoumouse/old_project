@@ -216,6 +216,7 @@
 * It's the simplest FFmpeg stream receiver.
 *
 */
+#include "../base/buf_unit_helper.h"
 #include "service_buffer.h"
 #include "encodec.h"
 #include <stdio.h>
@@ -242,6 +243,7 @@ extern "C" {
 #include "libavcodec/avcodec.h"
 #include "libswresample/swresample.h"
 #include "libavutil/opt.h"
+#include "libavutil/fifo.h"
 
 	//SDL
 #include "sdl/SDL.h"
@@ -568,13 +570,89 @@ void show_vfw_device(){
 
 #define SAVE_FILE 1
 
+#define BUF_SIZE_20K 2048000
+#define BUF_SIZE_1K 1024000
+
 #include "../save_file/FFWritter.h"
 #include "../save_file/ff_reader.h"
 #include "../libfaad/faac_encoder.h"
+#include "../reader/FAACDecoder.h"
 #include <string.h>
 base::Lock write_mtx_;
 std::deque<AVFrame *>::iterator it;
 CBufPool bufpool(1920 * 1080, 500);
+static void setup_array(uint8_t* out[SWR_CH_MAX], AVFrame* in_frame, int format, int samples)
+{
+	if (av_sample_fmt_is_planar((AVSampleFormat)format))
+	{
+		int i;
+
+		int plane_size = av_get_bytes_per_sample((AVSampleFormat)(format & 0xFF)) * samples; format &= 0xFF;
+
+		//从decoder出来的frame中的data数据不是连续分布的，所以不能这样写：
+		in_frame->data[0] + i*plane_size;
+
+		for (i = 0; i < in_frame->channels; i++)
+		{
+			out[i] = in_frame->data[i];
+		}
+	}
+	else
+	{
+		out[0] = in_frame->data[0];
+	}
+}
+
+static int TransSample(AVFrame *in_frame, AVFrame *out_frame, SwrContext* pSwrCtx)
+{
+	int ret;
+	int max_dst_nb_samples = 4096;
+	//int64_t dst_nb_samples;
+	int64_t src_nb_samples = in_frame->nb_samples;
+	out_frame->pts = in_frame->pts;
+	uint8_t* paudiobuf;
+	int decode_size, input_size, len;
+	if (pSwrCtx != NULL)
+	{
+		out_frame->nb_samples = av_rescale_rnd(swr_get_delay(pSwrCtx, 16000) + 2048,
+			44100, 16000, AV_ROUND_UP);
+
+		ret = av_samples_alloc(out_frame->data,
+			&out_frame->linesize[0],
+			2,
+			out_frame->nb_samples,
+			AV_SAMPLE_FMT_S16, 0);
+
+		if (ret < 0)
+		{
+			av_log(NULL, AV_LOG_WARNING, "[%s.%d %s() Could not allocate samples Buffer\n", __FILE__, __LINE__, __FUNCTION__);
+			return -1;
+		}
+
+		max_dst_nb_samples = out_frame->nb_samples;
+		//输入也可能是分平面的，所以要做如下处理
+		uint8_t* m_ain[SWR_CH_MAX];
+		setup_array(m_ain, in_frame, AV_SAMPLE_FMT_FLTP, src_nb_samples);
+
+		//注意这里，out_count和in_count是samples单位，不是byte
+		//所以这样av_get_bytes_per_sample(in_fmt_ctx->streams[audio_index]->codec->sample_fmt) * src_nb_samples是错的
+		len = swr_convert(pSwrCtx, out_frame->data, out_frame->nb_samples, (const uint8_t**)m_ain, src_nb_samples);
+		if (len < 0)
+		{
+			char errmsg[BUF_SIZE_1K];
+			av_strerror(len, errmsg, sizeof(errmsg));
+			av_log(NULL, AV_LOG_WARNING, "[%s:%d] swr_convert!(%d)(%s)", __FILE__, __LINE__, len, errmsg);
+			return -1;
+		}
+	}
+	else
+	{
+		printf("pSwrCtx with out init!\n");
+		return -1;
+	}
+	return 0;
+}
+
 
 int main(int argc, char* argv[])
 {
@@ -582,15 +660,16 @@ int main(int argc, char* argv[])
 	/////////////////////////////////////////////////////////////////////////////////////
 	av_register_all();
 
+
 	FFReader f_reader;
 	bool re_value = f_reader.Open("E:\\tg\\stream\\RTMP推流，收流保存FLV\\simplest_ffmpeg_receiver\\usetoopen.mp4");
 	if (!re_value)
 		return 0;
 	FFWritter* mp4_writter_ = new FFWritter("test1234.mp4", "mp4");
 	mp4_writter_->Open(true, AV_CODEC_ID_H264, 1920, 1080, 25, 5000,
-		true, AV_CODEC_ID_AAC, 16000, 2);
-	
-	
+		true, AV_CODEC_ID_AAC, 44100, 2);
+
+
 
 	int data_size = 0;
 	int data_type = -1;
@@ -601,7 +680,7 @@ int main(int argc, char* argv[])
 		break;
 		bool iskeyframe = false;
 		char* data_buf = f_reader.ReadFrame(&data_type, &data_size, &data_time, &iskeyframe);
-		
+
 		if (f_reader.AudioCodecId() == AV_CODEC_ID_NONE) // 没有音频的情况
 		{
 			if (data_type < 0)
@@ -624,41 +703,41 @@ int main(int argc, char* argv[])
 					mp4_writter_->WriteAudioOpeningData(data_buf, data_size, data_time);
 				printf("audio time = %d\n", data_time);
 				/*if (flv_writter_)
-					flv_writter_->WriteAudioOpeningData(data_buf, data_size, data_time);*/
+flv_writter_->WriteAudioOpeningData(data_buf, data_size, data_time);*/
 			}
-		/*	else
-			{
-				if (mp4_writter_)
-					mp4_writter_->WriteAudioEndingData(data_buf, data_size, data_time);*/
-				/*if (flv_writter_)
-					flv_writter_->WriteAudioEndingData(data_buf, data_size, data_time);*/
+			/*	else
+{
+if (mp4_writter_)
+mp4_writter_->WriteAudioEndingData(data_buf, data_size, data_time);*/
+			/*if (flv_writter_)
+flv_writter_->WriteAudioEndingData(data_buf, data_size, data_time);*/
 			/*}*/
 		}
-		else if(data_type == 2)    // 视频
+		else if (data_type == 2)    // 视频
 		{
 			if (true)
 			{
 				if (mp4_writter_);
-					mp4_writter_->WriteVideoOpeningData(data_buf, data_size, data_time);
-					printf("video time = %d\n", data_time);
+				mp4_writter_->WriteVideoOpeningData(data_buf, data_size, data_time);
+				printf("video time = %d\n", data_time);
 				/*if (flv_writter_)
-				{
-					bool is_keyframe = false;
-					char tmpspsbuf[256], tmpppsbuf[128];
-					int tmpspssize = 0; int tmpppssize = 0;
+{
+bool is_keyframe = false;
+char tmpspsbuf[256], tmpppsbuf[128];
+int tmpspssize = 0; int tmpppssize = 0;
 
-					ParseH264Frame((char*)data_buf, data_size, x264_buf_, x264_len_,
-						tmpspsbuf, tmpspssize, tmpppsbuf, tmpppssize,
-						is_keyframe, NULL, NULL);
+ParseH264Frame((char*)data_buf, data_size, x264_buf_, x264_len_,
+tmpspsbuf, tmpspssize, tmpppsbuf, tmpppssize,
+is_keyframe, NULL, NULL);
 
-					if (tmpspssize && tmpppssize)
-					{
-						flv_writter_->WriteAVCSequenceHeaderTag(tmpspsbuf, tmpspssize,
-							tmpppsbuf, tmpppssize);
-					}
+if (tmpspssize && tmpppssize)
+{
+flv_writter_->WriteAVCSequenceHeaderTag(tmpspsbuf, tmpspssize,
+tmpppsbuf, tmpppssize);
+}
 
-					flv_writter_->WriteVideoOpeningData(x264_buf_, x264_len_, data_time, iskeyframe);
-				}*/
+flv_writter_->WriteVideoOpeningData(x264_buf_, x264_len_, data_time, iskeyframe);
+}*/
 			}
 			//else
 			//{
@@ -684,11 +763,11 @@ int main(int argc, char* argv[])
 			//	}*/
 			//}
 		}
-		
+
 		f_reader.FreeFrame();
-		
+
 	}
-	
+
 	//if (f_reader.AudioCodecId() == AV_CODEC_ID_NONE)
 	//{
 	//	// 附加空音频
@@ -715,7 +794,7 @@ int main(int argc, char* argv[])
 	//mp4_writter_->Close();
 	//f_reader.Close();
 	//return 1;
-////////////////////////////////////////////////////////////////////////////////////
+	////////////////////////////////////////////////////////////////////////////////////
 	{
 
 		//x264
@@ -727,7 +806,7 @@ int main(int argc, char* argv[])
 
 	AVFrameCache avframecache;
 
- 	av_log_set_callback(my_logoutput);
+	av_log_set_callback(my_logoutput);
 	sps_ = new char[1024];
 	sps_size_ = 0;
 	pps_ = new char[1024];
@@ -737,7 +816,7 @@ int main(int argc, char* argv[])
 	//Input AVFormatContext and Output AVFormatContext
 	AVFormatContext *ifmt_ctx = NULL, *ofmt_ctx = NULL;
 	AVPacket pkt;
-	 char *in_filename, *out_filename, *rtmp_url;
+	char *in_filename, *out_filename, *rtmp_url;
 	int ret, i;
 	int videoindex = -1;
 	int audioindex = -1;
@@ -774,7 +853,7 @@ int main(int argc, char* argv[])
 	show_vfw_device();
 #else
 	//Windows
-//#ifdef _WIN32
+	//#ifdef _WIN32
 #ifdef USE_DSHOW 
 	AVInputFormat *ifmt = av_find_input_format("dshow");
 	//Set own video device's name
@@ -807,7 +886,7 @@ int main(int argc, char* argv[])
 		goto end;
 	}
 
-	for (i = 0; i<ifmt_ctx->nb_streams; i++)
+	for (i = 0; i < ifmt_ctx->nb_streams; i++)
 	{
 		if (ifmt_ctx->streams[i]->codec->codec_type == AVMEDIA_TYPE_AUDIO)
 		{
@@ -865,7 +944,7 @@ int main(int argc, char* argv[])
 
 	av_dump_format(ifmt_ctx, 0, in_filename, 0);
 
-	
+
 	//Output
 	// avformat_alloc_output_context2()函数可以初始化一个用于输出的AVFormatContext结构体
 	avformat_alloc_output_context2(&ofmt_ctx, NULL, NULL, out_filename); //RTMP
@@ -876,7 +955,7 @@ int main(int argc, char* argv[])
 		goto end;
 	}
 	ofmt = ofmt_ctx->oformat;
-	for (i = 0; i < ifmt_ctx->nb_streams; i++) 
+	for (i = 0; i < ifmt_ctx->nb_streams; i++)
 	{
 		//Create output AVStream according to input AVStream
 		AVStream *in_stream = ifmt_ctx->streams[i];
@@ -895,7 +974,7 @@ int main(int argc, char* argv[])
 			pCodec = avcodec_find_decoder(ifmt_ctx->streams[i]->codec->codec_id);
 			//AVCodec *pCodec1 = avcodec_find_encoder(AV_CODEC_ID_AAC);
 			ff_aencodec_ctx_ = ifmt_ctx->streams[audioindex]->codec;
-			//ff_aencodec_ctx_->sample_rate = 16000;
+			//ff_aencodec_ctx_->sample_rate = 44100;
 			if (avcodec_open2(ff_aencodec_ctx_, pCodec, NULL) < 0)
 			{
 				int a = 1;
@@ -935,13 +1014,13 @@ int main(int argc, char* argv[])
 			{
 				int a = 1;
 			}
-		
+
 			if (avcodec_open2(ff_encodec_ctx_, pCodec1, NULL) < 0)
 			{
 				int a = 1;
 			}
 		}
-		
+
 		if (ret < 0) {
 			printf("Failed to copy context from input to output stream codec context\n");
 			goto end;
@@ -963,7 +1042,7 @@ int main(int argc, char* argv[])
 	}
 
 	live_264size_ = 1920 * 1080 * 2;
-	
+
 	//Write file header
 	if (0)
 	{
@@ -976,7 +1055,7 @@ int main(int argc, char* argv[])
 	}
 
 	//进入读取程序
-	
+
 	//_beginthread(beginthread_fun, 0, NULL);
 	//_beginthread(beginthread_send_fun, 0, NULL);
 #if USE_H264BSF 
@@ -1003,10 +1082,10 @@ int main(int argc, char* argv[])
 		//------------------------------  
 		if (av_read_frame(ifmt_ctx, &pkt) >= 0)
 		{
-		
+
 			if ((pkt.stream_index == videoindex))
 			{
-				
+
 				/*if ((pkt.flags & AV_PKT_FLAG_KEY) && (pkt.size > 0))
 				{
 				double duration = pkt.duration * 1000.0 / ifmt_ctx->streams[videoindex]->time_base.den;
@@ -1014,17 +1093,17 @@ int main(int argc, char* argv[])
 				double duration = pkt.duration * 1000.0 / ifmt_ctx->streams[videoindex]->time_base.den;
 				/*	if ((*(pkt.data + 25) == 0x7) || (*(pkt.data + 25) == 0x1))*/
 
-					{
-						/*	char nal_start[] = { 0, 0, 0, 1 };
-							fwrite(nal_start, 4, 1, fpSave);
-							fwrite(pkt.data + 24, pkt.size - 24, 1, fpSave);*/
-						fwrite(pkt.data, pkt.size, 1,fpSave);
-						fflush(fpSave);
-					}
-				
-					////fwrite(pkt.data, 1, pkt.size, fpSave);//写数据到文件中  
-					//		fwrite(pkt.data, 1, pkt.size, fpSave);//写数据到文件中  
-				
+				{
+					/*	char nal_start[] = { 0, 0, 0, 1 };
+						fwrite(nal_start, 4, 1, fpSave);
+						fwrite(pkt.data + 24, pkt.size - 24, 1, fpSave);*/
+					fwrite(pkt.data, pkt.size, 1,fpSave);
+					fflush(fpSave);
+				}
+
+				////fwrite(pkt.data, 1, pkt.size, fpSave);//写数据到文件中  
+				//		fwrite(pkt.data, 1, pkt.size, fpSave);//写数据到文件中  
+
 			}
 			av_free_packet(&pkt);
 		}
@@ -1043,31 +1122,52 @@ int main(int argc, char* argv[])
 	int64_t in_channel_layout;
 	struct SwrContext *au_convert_ctx;
 	//Out Audio Param
-	uint64_t out_channel_layout = AV_CH_LAYOUT_STEREO;
+	//uint64_t out_channel_layout = AV_CH_LAYOUT_STEREO;
 	//nb_samples: AAC-1024 MP3-1152
 	int out_nb_samples = ff_aencodec_ctx_->frame_size;
 	AVSampleFormat out_sample_fmt = AV_SAMPLE_FMT_S16;
-	int out_sample_rate = 16000;
-	int out_channels = av_get_channel_layout_nb_channels(out_channel_layout);
-	int out_buffer_size = av_samples_get_buffer_size(NULL, out_channels, out_nb_samples, out_sample_fmt, 1);
+	int out_sample_rate = 44100;
+	//int out_channels = av_get_channel_layout_nb_channels(out_channel_layout);
+	//int out_buffer_size = av_samples_get_buffer_size(NULL, out_channels, out_nb_samples, out_sample_fmt, 1);
 	//////////////////////////////////////////////////////////////////////////
 
 	// FIX:Some Codec's Context Information is missing
 	in_channel_layout = av_get_default_channel_layout(2);
 	//Swr
 	au_convert_ctx = swr_alloc();
-	au_convert_ctx = swr_alloc_set_opts(au_convert_ctx, out_channel_layout, out_sample_fmt, out_sample_rate,
-		in_channel_layout, ff_aencodec_ctx_->sample_fmt, ff_aencodec_ctx_->sample_rate, 0, NULL);
-	swr_init(au_convert_ctx);
+	//////////////////////////////////////////////////////////////////////////
+	//av_opt_set_int(au_convert_ctx, "in_channel_layout", AV_CH_LAYOUT_STEREO, 0);
+	//av_opt_set_int(au_convert_ctx, "out_channel_layout", AV_CH_LAYOUT_STEREO, 0);
+	av_opt_set_int(au_convert_ctx, "in_channel_layout", AV_CH_LAYOUT_STEREO, 0);
+	av_opt_set_int(au_convert_ctx, "in_sample_rate", 16000, 0);
+	av_opt_set_sample_fmt(au_convert_ctx, "in_sample_fmt", AV_SAMPLE_FMT_S16, 0);
 
-	out_buffer = (uint8_t *)av_malloc(2000 * 2);
+	av_opt_set_int(au_convert_ctx, "out_channel_layout", AV_CH_LAYOUT_STEREO, 0);
+	av_opt_set_int(au_convert_ctx, "out_sample_rate", 44100, 0);
+	av_opt_set_sample_fmt(au_convert_ctx, "out_sample_fmt", AV_SAMPLE_FMT_S16, 0);
+	/*au_convert_ctx = swr_alloc_set_opts(au_convert_ctx, 3, out_sample_fmt, out_sample_rate,
+		3, ff_aencodec_ctx_->sample_fmt, ff_aencodec_ctx_->sample_rate, 0, NULL);*/
+	swr_init(au_convert_ctx);
+	if (av_sample_fmt_is_planar(ff_aencodec_ctx_->sample_fmt))
+	{
+		//如果是分平面数据，为每一声道分配一个fifo，单独存储各平面数据
+		for (int i = 0; i < ff_aencodec_ctx_->channels; i++)
+		{
+			//m_fifo[i] = av_fifo_alloc(BUF_SIZE_20K);
+		}
+	}
+	else {
+		//不分平面，所有的数据只要一个fifo就够了，其实用不用fifo完全看个人了，只是我觉得方便些
+		//	fifo = av_fifo_alloc(BUF_SIZE_20K);
+	}
+	out_buffer = (uint8_t *)av_malloc(5000 * 20);
 
 	FAACEncoder *faac_encoder = new FAACEncoder;
 	int size = av_get_bytes_per_sample(ff_aencodec_ctx_->sample_fmt);
 
 	// 定义别名  
 	typedef unsigned char   BYTE;
-	unsigned long   nSampleRate = 16000;
+	unsigned long   nSampleRate = 44100;
 	unsigned int    nChannels = 2;
 	unsigned int    nPCMBitSize = 16;
 	unsigned long   nInputSamples = 0;
@@ -1075,10 +1175,15 @@ int main(int argc, char* argv[])
 	//faacEncHandle   hEncoder = { 0 };
 
 
-	faac_encoder->Init(false,nSampleRate,nChannels,nPCMBitSize,nSampleRate);
+	faac_encoder->Init(false, nSampleRate, nChannels, nPCMBitSize, 16000);
 
 
 
+
+	//////////////////////////////////////////////////////////////////////////
+	BufUnitHelper* unit_helper_ = new BufUnitHelper(1024 * 2 * 2);
+
+	//////////////////////////////////////////////////////////////////////////
 	//hEncoder = faacEncOpen(nSampleRate, nChannels, &nInputSamples, &nMaxOutputBytes);
 
 	//if (hEncoder == NULL)
@@ -1131,12 +1236,26 @@ int main(int argc, char* argv[])
 	}
 
 
+	FAACDecoder *aac_decoder_ = new FAACDecoder();
+	aac_decoder_->Init(8000, 2, 16);
+
+
 	FILE *p = NULL;
 	p = fopen("save_pcm.pcm", "w+b");
 	FILE* aac_out = fopen("save_aac.aac", "w+b");
+
+	uint8_t** sample_pcmbuf_;
+	int sample_pcmsize_;
+	uint8_t** resample_pcmbuf_;
+	int resample_max_sam_nb_ = 0;
+	sample_pcmbuf_ = NULL;
+	resample_pcmbuf_ = NULL;
+	int dst_linesize_ = 0;
+	int dst_bufsize = 0;
 	while (1) {
 		num123--;
 		num456++;
+		int nnb_samples = 0;
 		if (num456 == 26) num456 = 0;
 		if (num456 == 0)
 		{
@@ -1159,368 +1278,454 @@ int main(int argc, char* argv[])
 		{
 
 			if (pkt.size < 0)
-				continue;
-			AVFrame*  avs_frame;
-
-			avs_frame = av_frame_alloc();
-
-			//uint8_t *out_buffer;
-			//decode
-			int num = 0;
-			//int av_num = avcodec_decode_video2(ff_codec_ctx_, avs_frame, &num, &pkt);
-
-			int av_num = avcodec_decode_audio4(ff_aencodec_ctx_, avs_frame, &num, &pkt);
-			// 编码  
-			if (av_num < 0)
 			{
-				av_frame_free(&avs_frame);
-				printf("decoding audio stream failed\n");
 				av_free_packet(&pkt);
 				continue;
 			}
+			AVFrame*  avs_frame;
+			AVFrame*  av_outframe;
+			avs_frame = av_frame_alloc();
+			av_outframe = av_frame_alloc();
+			//uint8_t *out_buffer;
+			//decode
+			int num = 1;
+			//int av_num = avcodec_decode_video2(ff_codec_ctx_, avs_frame, &num, &pkt);
+
+			//int av_num = avcodec_decode_audio4(ff_aencodec_ctx_, avs_frame, &num, &pkt);
+			unsigned int pcm_outlen = 0;
+			char *pcmbuf_ = new char[15000];
+			memset(pcmbuf_, 0, 15000);
+			aac_decoder_->Decode((unsigned char*)pkt.data, pkt.size,
+				(unsigned char*)pcmbuf_, pcm_outlen);
+
+
+
+			if (pcm_outlen > 0)
+			{
+				//fwrite(pcmbuf_, 1, pcm_outlen/*out_buffer_size*/, p);				
+				//free(pcmbuf_);
+			}
+			else
+				continue;
+			//continue;
+			// 编码  
+			/*if (av_num < 0)
+			{
+			av_frame_free(&avs_frame);
+			printf("decoding audio stream failed\n");
+			av_free_packet(&pkt);
+			continue;
+			}*/
 
 #define SAVE_PCM 1
 #ifdef SAVE_PCM 	
-			
+
 			if (num)
 			{
-				swr_convert(au_convert_ctx, &out_buffer, 1024, (const uint8_t **)avs_frame->data, avs_frame->nb_samples );
-				//if (avs_frame->data[0] && avs_frame->data[1])
-				//{
-				//	for (int i = 0; i < ff_aencodec_ctx_->frame_size/*ifmt_ctx->streams[stream_index]->codec->frame_size*/; i++)
-				//	{
-				//		fwrite(avs_frame->data[0] + i * size, 1, size, p);
-				//		fwrite(avs_frame->data[1] + i * size, 1, size, p);
-				//	}
-				//}
-				//else if (avs_frame->data[0])
-				//{			
-				//	fwrite(avs_frame->data[0], 1, avs_frame->linesize[0], p);
-					fwrite(out_buffer, 1, out_buffer_size, p);
-				//}
-				//av_frame_free(&avs_frame);
-			}
-	
+				//////////////////////////////////////////////////////////////////////////
+				int dst_samrate = 44100;
+				int dst_channel = 2;
+
+				int src_sam_bytes = av_get_bytes_per_sample(AV_SAMPLE_FMT_S16);
+				int src_sam_nb = (pcm_outlen / src_sam_bytes) / 2;
+				int src_linesize;
+				if (sample_pcmbuf_ == NULL)
+				{
+					av_samples_alloc_array_and_samples(&sample_pcmbuf_, &src_linesize, 2,
+						src_sam_nb, AV_SAMPLE_FMT_S16, 1);
+				}
+				memcpy(sample_pcmbuf_[0], pcmbuf_, pcm_outlen);
+
+				if (resample_max_sam_nb_ == 0)
+				{
+					int tmp_dst_samnb =
+						av_rescale_rnd(src_sam_nb, dst_samrate, 16000, AV_ROUND_UP);
+					av_samples_alloc_array_and_samples(&resample_pcmbuf_, &dst_linesize_, dst_channel,
+						tmp_dst_samnb, AV_SAMPLE_FMT_S16, 1);
+					resample_max_sam_nb_ = tmp_dst_samnb;
+				}
+
+				int dst_sam_nb = av_rescale_rnd(swr_get_delay(au_convert_ctx, 16000) + src_sam_nb,
+					dst_samrate, 16000, AV_ROUND_UP);
+				int dst_samp_bytes = av_get_bytes_per_sample(AV_SAMPLE_FMT_S16);
+
+				if (dst_sam_nb > resample_max_sam_nb_)
+				{
+					av_free(resample_pcmbuf_[0]);
+					av_samples_alloc(resample_pcmbuf_, &dst_linesize_, dst_channel,
+						dst_sam_nb, AV_SAMPLE_FMT_S16, 1);
+					resample_max_sam_nb_ = dst_sam_nb;
+				}
+				int ret = swr_convert(au_convert_ctx, resample_pcmbuf_, dst_sam_nb,
+					(const uint8_t**)sample_pcmbuf_, src_sam_nb);
+				if (ret >= 0)
+				{
+					dst_bufsize = av_samples_get_buffer_size(&dst_linesize_,
+						dst_channel, ret, AV_SAMPLE_FMT_S16, 1);
+					//int dst_bufsize = ret * dst_samp_bytes;
+				}
+
+				//fwrite(resample_pcmbuf_[0], 1, dst_bufsize/*out_buffer_size*/, p);
+
+				//////////////////////////////////////////////////////////////////////////
+
+
+				unit_helper_->PushBuf((char *)resample_pcmbuf_[0], dst_bufsize);
+
+				while (unit_helper_->ReadBuf())
+				{
+
+					//observer_->OnSourceReaderAudioBuf(source_id_, unit_helper_->UnitBuf(),
+					//unit_helper_->UnitSize());
+
+					fwrite(unit_helper_->UnitBuf(), 1, unit_helper_->UnitSize(), p);
+					//TransSample(avs_frame, av_outframe, au_convert_ctx);
+					//uint8_t* m_ain[SWR_CH_MAX];
+					//setup_array(m_ain, avs_frame, AV_SAMPLE_FMT_FLTP, 2);
+
+					/* nnb_samples = av_rescale_rnd(swr_get_delay(au_convert_ctx, 16000) + 2048,
+						 44100, 16000, AV_ROUND_UP);*/
+					//swr_convert(au_convert_ctx, &out_buffer, 1024, /*(const uint8_t **)m_ain*/(const uint8_t **)avs_frame->data, avs_frame->nb_samples);
+					//if (avs_frame->data[0] && avs_frame->data[1])
+					//{
+					//	for (int i = 0; i < ff_aencodec_ctx_->frame_size/*ifmt_ctx->streams[stream_index]->codec->frame_size*/; i++)
+					//	{
+					//		fwrite(avs_frame->data[0] + i * size, 1, size, p);
+					//		fwrite(avs_frame->data[1] + i * size, 1, size, p);
+					//	}
+					//}
+					//else if (avs_frame->data[0])
+					//{			
+					//	fwrite(avs_frame->data[0], 1, avs_frame->linesize[0], p);
+
+					//}
+					//av_frame_free(&avs_frame);
 #endif
-			//faacEncEncode 编码
-			//int nRet = faacEncEncode(hEncoder, (int*)avs_frame->data[0], nInputSamples, pbAACBuffer, nMaxOutputBytes);
-			//faac_encodec 编码
-			int outlen = 0;
-			int audio_len = 1024 * 2 * nChannels;
-			int faac_size_ = faac_encoder->MaxOutBytes();
-			char* faac_buf_ = new char[faac_size_];
-			unsigned int sample_count = (audio_len >> 1);
-			faac_encoder->Encode((unsigned char*)out_buffer/*avs_frame->data*/, sample_count,
-				(unsigned char*)faac_buf_, outlen);
-			// 写入转码后的数据  
-			//if (outlen <= 0) continue;
-			//fwrite(pbAACBuffer, 1, nRet, aac_out);
-			if (outlen)
-			{
-				fwrite(faac_buf_, 1, outlen, aac_out);
-				//free(faac_buf_);
-			}
-
-			//avcodec_encode_audio2(ff_aencodec_ctx_,)
-			//printf("audio pts = %d\n", pkt.pts);
-			bool iskeyframe = false;
-			char* data_buf = f_reader.GetFrame(&data_type, ifmt_ctx, pkt, &data_size, &data_time, &iskeyframe, videoindex);
-
-			//avcodec_decode_audio4();
-			//if (f_reader.AudioCodecId() == AV_CODEC_ID_NONE) // 没有音频的情况
-			//{
-			//	if (data_type < 0)
-			//	{
-			//		continue;
-			//	}
-			//}
-			//else
-			//{
-			//	if (data_type < 0/* || data_time > ffReader.AudioDuration()*/)
-			//	{
-			//		continue;
-			//	}
-			//}
-
-			if (/*data_type ==*/ 1)         // 音频
-			{
-				if (true)
-				{
-					//data_time = audio_pts;
-					if (mp4_writter_)
-						mp4_writter_->WriteAudioOpeningData(faac_buf_/*(char *)pkt.data*//*data_buf*/, outlen/*pkt.size*/, /*audio_pts*/ data_time);
-					printf("audio time = %d\n", data_time);
-					//audio_frame_count_++;
-					//audio_pts += audio_frame_count_ * 90000 * 1024 / 44100;
-					//audio_pts = audio_frame_count_ * 1000 * 1024 / 44100 * 90000 / 1000;
-				}
-			}
-			
-		}
-
-		if (pkt.stream_index == videoindex)
-		{
-
-			//printf("video pts = %d\n", pkt.pts);
-			if (false == has_got_keyframe)
-			{
-				has_got_keyframe = (pkt.flags & AV_PKT_FLAG_KEY);
-			}
-			//if (pkt.flags & AV_PKT_FLAG_KEY)
-			if (pkt.size > 0 && has_got_keyframe/*(pkt.flags & AV_PKT_FLAG_KEY)*/)
-			{
-				double duration = pkt.duration * 1000.0 / ifmt_ctx->streams[videoindex]->time_base.den;
-
-				AVFrame*  avs_frame;
-
-				avs_frame = av_frame_alloc();
-
-				//uint8_t *out_buffer;
-				//decode
-				int num = 0;
-				int av_num = avcodec_decode_video2(ff_codec_ctx_, avs_frame, &num, &pkt);
-
-				if (avs_frame->pict_type == AV_PICTURE_TYPE_NONE)
-				{
-					av_free_packet(&pkt);
-					continue;
-				}
-				//av_free_packet(&pkt);
-
-				///////////////////////////////存入已存在文件中///////////////////////////////////////////
-				int data_size = 0;
-				int data_type = -1;
-				long long data_time1 = 0;
-				
-
-				uint8_t *out_buffer;
-				AVFrame*  avs_YUVframe;
-				avs_YUVframe = av_frame_alloc();
-				out_buffer = new uint8_t[avpicture_get_size(AV_PIX_FMT_YUV420P, ff_codec_ctx_->width, ff_codec_ctx_->height)];
-				avpicture_fill((AVPicture *)avs_YUVframe, (uint8_t*)out_buffer, AV_PIX_FMT_YUV420P, ff_codec_ctx_->width, ff_codec_ctx_->height);
-				struct SwsContext * img_convert_ctx;
-				img_convert_ctx = sws_getContext(ff_codec_ctx_->width, ff_codec_ctx_->height, ff_codec_ctx_->pix_fmt, ff_codec_ctx_->width, ff_codec_ctx_->height, AV_PIX_FMT_YUV420P, SWS_BICUBIC, NULL, NULL, NULL);
-				sws_scale(img_convert_ctx, avs_frame->data, avs_frame->linesize, 0, ff_codec_ctx_->height, avs_YUVframe->data, avs_YUVframe->linesize);
-				avs_YUVframe->pict_type = avs_frame->pict_type;
-
-
-
-				AVFrame *yuv_frame_ = av_frame_alloc();
-				//base::AutoLock al(write_mtx_);
-				int live_yuvsize_ = 1920 * 1080 * 3 / 2;
-				char* live_yuvbuf_ = new char[live_yuvsize_];
-				avpicture_fill((AVPicture *)yuv_frame_, (uint8_t*)live_yuvbuf_,
-					AV_PIX_FMT_YUV420P, 1920, 1080);
-				SwsContext *sws_ctx_ = sws_getContext(1920, 1080, AV_PIX_FMT_YUV420P,
-					1920, 1080, AV_PIX_FMT_YUV420P,
-					SWS_BICUBIC, 0, 0, 0);
-				//base::AutoLock al(write_mtx_);	
-				sws_scale(sws_ctx_, avs_YUVframe->data, avs_YUVframe->linesize, 0,
-					1080, yuv_frame_->data, yuv_frame_->linesize);
-
-				int outlen = 0;
-				char* nalbuf = NULL;
-				if (isKeyframe == true)
-				{	
-					 nalbuf = x264_encoder_->Encode((unsigned char*)live_yuvbuf_,
-						(unsigned char*)live_264buf_, outlen, isKeyframe);
-				}
-				else
-				{
-					 nalbuf = x264_encoder_->Encode((unsigned char*)live_yuvbuf_,
-						(unsigned char*)live_264buf_, outlen, isKeyframe);
-					isKeyframe = false;
-				}
-				
-
-
-				bool iskeyframe = false;
-				char* data_buf = f_reader.GetFrame(&data_type, ifmt_ctx, pkt, &data_size, &data_time, &iskeyframe, videoindex);
-				
-				//if (f_reader.AudioCodecId() == AV_CODEC_ID_NONE) // 没有音频的情况
-				//{
-				//	if (data_type < 0)
-				//	{
-				//		continue;
-				//	}
-				//}
-				//else
-				//{
-				//	if (data_type < 0/* || data_time > ffReader.AudioDuration()*/)
-				//	{
-				//		continue;
-				//	}
-				//}
-
-				//if (data_type == 1)         // 音频
-				//{
-				//	if (true)
-				//	{
-				//		if (mp4_writter_)
-				//			mp4_writter_->WriteAudioOpeningData(data_buf, data_size, data_time);
-				//		/*if (flv_writter_)
-				//		flv_writter_->WriteAudioOpeningData(data_buf, data_size, data_time);*/
-				//	}
-				//	else
-				//	{
-				//		if (mp4_writter_)
-				//			mp4_writter_->WriteAudioEndingData(data_buf, data_size, data_time);
-				//		/*if (flv_writter_)
-				//		flv_writter_->WriteAudioEndingData(data_buf, data_size, data_time);*/
-				//	}
-				//}
-				//mp4_writter_->Close();
-				//f_reader.Close();
-				//data_time /= 10;
-				//data_time = av_rescale_q(data_time, av_make_q(1, 12800), av_make_q(1, 1000));
-				if (data_type == 2)    // 视频
-				{
-					if (true)
+					//faacEncEncode 编码
+					//int nRet = faacEncEncode(hEncoder, (int*)avs_frame->data[0], nInputSamples, pbAACBuffer, nMaxOutputBytes);
+					//faac_encodec 编码
+					int outlen = 0;
+					int audio_len = 1024 * 2 * nChannels;
+					int faac_size_ = /*av_outframe->nb_samples*2*/faac_encoder->MaxOutBytes();
+					char* faac_buf_ = new char[faac_size_];
+					unsigned int sample_count = (unit_helper_->UnitSize() >> 1);
+					faac_encoder->Encode(/*(unsigned char*)av_outframe->data[0]*/(unsigned char *)unit_helper_->UnitBuf()/*(unsigned char*)resample_pcmbuf_[0]*//*avs_frame->data*/, sample_count,
+						(unsigned char*)faac_buf_, outlen);
+					// 写入转码后的数据  
+					//if (outlen <= 0) continue;
+					//fwrite(pbAACBuffer, 1, nRet, aac_out);
+					if (outlen)
 					{
-						if (mp4_writter_)
-							mp4_writter_->WriteVideoOpeningData(nalbuf/*data_buf*/, outlen/*data_size*/, data_time);
-						printf("video time = %d\n", data_time);
+						fwrite(faac_buf_, 1, outlen, aac_out);
+						//free(faac_buf_);
+					}
+
+					//avcodec_encode_audio2(ff_aencodec_ctx_,)
+					//printf("audio pts = %d\n", pkt.pts);
+					bool iskeyframe = false;
+					//char* data_buf = f_reader.GetFrame(&data_type, ifmt_ctx, pkt, &data_size, &data_time, &iskeyframe, videoindex);
+
+					//avcodec_decode_audio4();
+					//if (f_reader.AudioCodecId() == AV_CODEC_ID_NONE) // 没有音频的情况
+					//{
+					//	if (data_type < 0)
+					//	{
+					//		continue;
+					//	}
+					//}
+					//else
+					//{
+					//	if (data_type < 0/* || data_time > ffReader.AudioDuration()*/)
+					//	{
+					//		continue;
+					//	}
+					//}
+
+						if (outlen > 0/*data_type ==*/)         // 音频
+						{
+							if (true)
+							{
+								//data_time = audio_pts;
+								if (mp4_writter_)
+									mp4_writter_->WriteAudioOpeningData(faac_buf_/*(char *)pkt.data*//*data_buf*/, outlen/*pkt.size*/, /*audio_pts*/ data_time += 23);
+								printf("audio time = %d\n", data_time);
+								av_frame_free(&avs_frame);
+								//free(faac_buf_);
+							//free(pcmbuf_);
+							//free(resample_pcmbuf_[0]);
+							//free(sample)
+							//audio_frame_count_++;
+							//audio_pts += audio_frame_count_ * 90000 * 1024 / 44100;
+							//audio_pts = audio_frame_count_ * 1000 * 1024 / 44100 * 90000 / 1000;
+							}
+						}
 					}
 				}
-				//free(out_buffer);
-				av_frame_free(&yuv_frame_);
-				free(live_yuvbuf_);
-				sws_freeContext(sws_ctx_);
-				//mp4_writter_->Close();
-				//f_reader.Close();
-				//f_reader.FreeFrame();
-			
-				//////////////////////////////////////////////////////////////////////////
-				/*AVFrame*  avs_YUVframe;
-				avs_YUVframe = av_frame_alloc();
-				out_buffer = new uint8_t[avpicture_get_size(AV_PIX_FMT_YUV420P, ff_codec_ctx_->width, ff_codec_ctx_->height)];
-				avpicture_fill((AVPicture *)avs_YUVframe, (uint8_t*)out_buffer, AV_PIX_FMT_YUV420P, ff_codec_ctx_->width, ff_codec_ctx_->height);
-				struct SwsContext * img_convert_ctx;
-				img_convert_ctx = sws_getContext(ff_codec_ctx_->width, ff_codec_ctx_->height, ff_codec_ctx_->pix_fmt, ff_codec_ctx_->width, ff_codec_ctx_->height, AV_PIX_FMT_YUV420P, SWS_BICUBIC, NULL, NULL, NULL);
-				sws_scale(img_convert_ctx, avs_frame->data, avs_frame->linesize, 0, ff_codec_ctx_->height, avs_YUVframe->data, avs_YUVframe->linesize);
-				avs_YUVframe->pict_type = avs_frame->pict_type;*/
+
+			}
+			if (pkt.stream_index == videoindex)
+			{
+
+				//printf("video pts = %d\n", pkt.pts);
+				if (false == has_got_keyframe)
+				{
+					has_got_keyframe = (pkt.flags & AV_PKT_FLAG_KEY);
+				}
+				//if (pkt.flags & AV_PKT_FLAG_KEY)
+				if (pkt.size > 0 && has_got_keyframe/*(pkt.flags & AV_PKT_FLAG_KEY)*/)
+				{
+					double duration = pkt.duration * 1000.0 / ifmt_ctx->streams[videoindex]->time_base.den;
+
+					AVFrame*  avs_frame;
+
+					avs_frame = av_frame_alloc();
+
+					//uint8_t *out_buffer;
+					//decode
+					int num = 0;
+					int av_num = avcodec_decode_video2(ff_codec_ctx_, avs_frame, &num, &pkt);
+
+					if (avs_frame->pict_type == AV_PICTURE_TYPE_NONE)
+					{
+						av_free_packet(&pkt);
+						av_frame_free(&avs_frame);
+						continue;
+					}
+					//av_free_packet(&pkt);
+
+					///////////////////////////////存入已存在文件中///////////////////////////////////////////
+					int data_size = 0;
+					int data_type = -1;
+					long long data_time1 = 0;
+
+
+					uint8_t *out_buffer;
+					AVFrame*  avs_YUVframe;
+					avs_YUVframe = av_frame_alloc();
+					out_buffer = new uint8_t[avpicture_get_size(AV_PIX_FMT_YUV420P, ff_codec_ctx_->width, ff_codec_ctx_->height)];
+					avpicture_fill((AVPicture *)avs_YUVframe, (uint8_t*)out_buffer, AV_PIX_FMT_YUV420P, ff_codec_ctx_->width, ff_codec_ctx_->height);
+					struct SwsContext * img_convert_ctx;
+					img_convert_ctx = sws_getContext(ff_codec_ctx_->width, ff_codec_ctx_->height, ff_codec_ctx_->pix_fmt, ff_codec_ctx_->width, ff_codec_ctx_->height, AV_PIX_FMT_YUV420P, SWS_BICUBIC, NULL, NULL, NULL);
+					sws_scale(img_convert_ctx, avs_frame->data, avs_frame->linesize, 0, ff_codec_ctx_->height, avs_YUVframe->data, avs_YUVframe->linesize);
+					avs_YUVframe->pict_type = avs_frame->pict_type;
+
+
+
+					AVFrame *yuv_frame_ = av_frame_alloc();
+					//base::AutoLock al(write_mtx_);
+					int live_yuvsize_ = 1920 * 1080 * 3 / 2;
+					char* live_yuvbuf_ = new char[live_yuvsize_];
+					avpicture_fill((AVPicture *)yuv_frame_, (uint8_t*)live_yuvbuf_,
+						AV_PIX_FMT_YUV420P, 1920, 1080);
+					SwsContext *sws_ctx_ = sws_getContext(1920, 1080, AV_PIX_FMT_YUV420P,
+						1920, 1080, AV_PIX_FMT_YUV420P,
+						SWS_BICUBIC, 0, 0, 0);
+					//base::AutoLock al(write_mtx_);	
+					sws_scale(sws_ctx_, avs_YUVframe->data, avs_YUVframe->linesize, 0,
+						1080, yuv_frame_->data, yuv_frame_->linesize);
+
+					int outlen = 0;
+					char* nalbuf = NULL;
+					if (isKeyframe == true)
+					{
+						nalbuf = x264_encoder_->Encode((unsigned char*)live_yuvbuf_,
+							(unsigned char*)live_264buf_, outlen, isKeyframe);
+					}
+					else
+					{
+						nalbuf = x264_encoder_->Encode((unsigned char*)live_yuvbuf_,
+							(unsigned char*)live_264buf_, outlen, isKeyframe);
+						isKeyframe = false;
+					}
+
+
+
+					bool iskeyframe = false;
+					char* data_buf = f_reader.GetFrame(&data_type, ifmt_ctx, pkt, &data_size, &data_time, &iskeyframe, videoindex);
+
+					//if (f_reader.AudioCodecId() == AV_CODEC_ID_NONE) // 没有音频的情况
+					//{
+					//	if (data_type < 0)
+					//	{
+					//		continue;
+					//	}
+					//}
+					//else
+					//{
+					//	if (data_type < 0/* || data_time > ffReader.AudioDuration()*/)
+					//	{
+					//		continue;
+					//	}
+					//}
+
+					//if (data_type == 1)         // 音频
+					//{
+					//	if (true)
+					//	{
+					//		if (mp4_writter_)
+					//			mp4_writter_->WriteAudioOpeningData(data_buf, data_size, data_time);
+					//		/*if (flv_writter_)
+					//		flv_writter_->WriteAudioOpeningData(data_buf, data_size, data_time);*/
+					//	}
+					//	else
+					//	{
+					//		if (mp4_writter_)
+					//			mp4_writter_->WriteAudioEndingData(data_buf, data_size, data_time);
+					//		/*if (flv_writter_)
+					//		flv_writter_->WriteAudioEndingData(data_buf, data_size, data_time);*/
+					//	}
+					//}
+					//mp4_writter_->Close();
+					//f_reader.Close();
+					//data_time /= 10;
+					//data_time = av_rescale_q(data_time, av_make_q(1, 12800), av_make_q(1, 1000));
+					if (data_type == 2)    // 视频
+					{
+						if (true)
+						{
+							if (mp4_writter_)
+								mp4_writter_->WriteVideoOpeningData(nalbuf/*data_buf*/, outlen/*data_size*/, data_time);
+							printf("video time = %d\n", data_time);
+						}
+					}
+					//free(out_buffer);
+					av_frame_free(&yuv_frame_);
+					free(live_yuvbuf_);
+					sws_freeContext(sws_ctx_);
+					//mp4_writter_->Close();
+					//f_reader.Close();
+					//f_reader.FreeFrame();
+
+					//////////////////////////////////////////////////////////////////////////
+					/*AVFrame*  avs_YUVframe;
+					avs_YUVframe = av_frame_alloc();
+					out_buffer = new uint8_t[avpicture_get_size(AV_PIX_FMT_YUV420P, ff_codec_ctx_->width, ff_codec_ctx_->height)];
+					avpicture_fill((AVPicture *)avs_YUVframe, (uint8_t*)out_buffer, AV_PIX_FMT_YUV420P, ff_codec_ctx_->width, ff_codec_ctx_->height);
+					struct SwsContext * img_convert_ctx;
+					img_convert_ctx = sws_getContext(ff_codec_ctx_->width, ff_codec_ctx_->height, ff_codec_ctx_->pix_fmt, ff_codec_ctx_->width, ff_codec_ctx_->height, AV_PIX_FMT_YUV420P, SWS_BICUBIC, NULL, NULL, NULL);
+					sws_scale(img_convert_ctx, avs_frame->data, avs_frame->linesize, 0, ff_codec_ctx_->height, avs_YUVframe->data, avs_YUVframe->linesize);
+					avs_YUVframe->pict_type = avs_frame->pict_type;*/
 
 #define USE_VIDEO_FRAME_LIST 0
 #if     USE_VIDEO_FRAME_LIST
 
-				if (video_frame_list_.empty())
-				{
-					video_frame_list_.push_back(avs_YUVframe);
-					it = video_frame_list_.begin();
-				}
-				else
-				{
+					if (video_frame_list_.empty())
+					{
+						video_frame_list_.push_back(avs_YUVframe);
+						it = video_frame_list_.begin();
+					}
+					else
+					{
+						//Sleep(40);
+						video_frame_list_.push_back(avs_YUVframe);
+					}
+
+					//it = video_frame_list_.begin();
+					if (video_frame_list_.size() > 500)
+					{
+						std::deque<AVFrame *>::iterator it = video_frame_list_.begin();
+						av_frame_free(&video_frame_list_.front());
+						video_frame_list_.pop_front();
+						//video_frame_list_.pop_front();
+						//	video_frame_list_.erase(it);
+						//Sleep(100);
+						printf("%d\n", video_frame_list_.size());
+					}
+					//av_frame_free(&avs_YUVframe);
+					//}
+#endif
 					//Sleep(40);
-					video_frame_list_.push_back(avs_YUVframe);
-				}
-
-				//it = video_frame_list_.begin();
-				if (video_frame_list_.size() > 500)
-				{
-					std::deque<AVFrame *>::iterator it = video_frame_list_.begin();
-					av_frame_free(&video_frame_list_.front());
-					video_frame_list_.pop_front();
+					//if (avs_YUVframe == NULL);
+					//AVFrame* frame_ = (AVFrame*)bufpool.NewBuf();
+					//frame_ = avs_YUVframe;
+					//if ((avs_YUVframe == NULL) || (avs_YUVframe->type < 0) || (avs_YUVframe->width == 1980))
+					//	continue;
+					//AVFrame* frame_ = avframecache.MallocAndCopyAVFrame(avs_frame);
+					////memcpy(frame_, avs_YUVframe,sizeof(*avs_YUVframe));
+					////printf("456");
+					//base::AutoLock al(write_mtx_);
+					//write_mtx_.Acquire();
+					//video_frame_list_.push_back(frame_);
+					//write_mtx_.Release();
+					////send_frame_info(avs_YUVframe, 0);
+					//if (video_frame_list_.size() >= 25)
+					//{
+					//	AVFrame* del_frame = video_frame_list_.front();
+					//	avframecache.FreeAVFrame(del_frame);
+					//	video_frame_list_.pop_front();
+					//	//delete del_frame;
+					//	//	del_frame = NULL;
+					//}
+					//delete out_buffer;
+					//printf("avpacket num = %d\n", avpacket_num++);
+					//video_frame_list_.push_back(avs_frame);
+					//////////////////////////av_frame_free(&avs_frame);
+					//av_frame_free(&frame_);
+					av_frame_free(&avs_YUVframe);
+					free(out_buffer);
+					out_buffer = NULL;
+					//av_free_packet(&pkt);
+					//AVFrame *free_char = video_frame_list_.front();
+					//bufpool.FreeBuf((char *)free_char);
 					//video_frame_list_.pop_front();
-					//	video_frame_list_.erase(it);
-					//Sleep(100);
-					printf("%d\n", video_frame_list_.size());
 				}
-				//av_frame_free(&avs_YUVframe);
-				//}
-#endif
-				//Sleep(40);
-				//if (avs_YUVframe == NULL);
-				//AVFrame* frame_ = (AVFrame*)bufpool.NewBuf();
-				//frame_ = avs_YUVframe;
-				//if ((avs_YUVframe == NULL) || (avs_YUVframe->type < 0) || (avs_YUVframe->width == 1980))
-				//	continue;
-				AVFrame* frame_ = avframecache.MallocAndCopyAVFrame(avs_frame);
-				//memcpy(frame_, avs_YUVframe,sizeof(*avs_YUVframe));
-				//printf("456");
-				base::AutoLock al(write_mtx_);
-				write_mtx_.Acquire();
-				video_frame_list_.push_back(frame_);
-				write_mtx_.Release();
-				//send_frame_info(avs_YUVframe, 0);
-				if (video_frame_list_.size() >= 25)
-				{
-					AVFrame* del_frame = video_frame_list_.front();
-					avframecache.FreeAVFrame(del_frame);
-					video_frame_list_.pop_front();
-					//delete del_frame;
-					//	del_frame = NULL;
-				}
-				//delete out_buffer;
-				//printf("avpacket num = %d\n", avpacket_num++);
-				//video_frame_list_.push_back(avs_frame);
-				//////////////////////////av_frame_free(&avs_frame);
-				//av_frame_free(&frame_);
-				av_frame_free(&avs_YUVframe);
-				free(out_buffer);
-				out_buffer = NULL;
-				//av_free_packet(&pkt);
-				//AVFrame *free_char = video_frame_list_.front();
-				//bufpool.FreeBuf((char *)free_char);
-				//video_frame_list_.pop_front();
+				//////////////////////////////////////////////////////////////////////////
+				//#ifdef SAVE_FILE
+				//			in_stream = ifmt_ctx->streams[pkt.stream_index];
+				//			out_stream = ofmt_ctx->streams[pkt.stream_index];
+				//			/* copy packet */
+				//			//Convert PTS/DTS
+				//			pkt.pts = av_rescale_q_rnd(pkt.pts, in_stream->time_base, out_stream->time_base, (AVRounding)(AV_ROUND_NEAR_INF | AV_ROUND_PASS_MINMAX));
+				//			pkt.dts = av_rescale_q_rnd(pkt.dts, in_stream->time_base, out_stream->time_base, (AVRounding)(AV_ROUND_NEAR_INF | AV_ROUND_PASS_MINMAX));
+				//			pkt.duration = av_rescale_q(pkt.duration, in_stream->time_base, out_stream->time_base);
+				//			pkt.pos = -1;
+				//			//Print to Screen
+				//			if (pkt.stream_index == videoindex){
+				//				printf("Receive %8d video frames from input URL\n", frame_index);
+				//				frame_index++;
+				//
+				//#if USE_H264BSF 
+				//				av_bitstream_filter_filter(h264bsfc, in_stream->codec, NULL, &pkt.data, &pkt.size, pkt.data, pkt.size, 0);
+				//#endif
+				//			}
+				//			
+				//			ret = av_write_frame(ofmt_ctx, &pkt);
+				//			//ret = av_interleaved_write_frame(ofmt_ctx, &pkt);
+				//
+				//			if (ret < 0) {
+				//				printf("Error muxing packet\n");
+				//				break;
+				//			}
+				//			
+				//#endif
+
 			}
-			//////////////////////////////////////////////////////////////////////////
-//#ifdef SAVE_FILE
-//			in_stream = ifmt_ctx->streams[pkt.stream_index];
-//			out_stream = ofmt_ctx->streams[pkt.stream_index];
-//			/* copy packet */
-//			//Convert PTS/DTS
-//			pkt.pts = av_rescale_q_rnd(pkt.pts, in_stream->time_base, out_stream->time_base, (AVRounding)(AV_ROUND_NEAR_INF | AV_ROUND_PASS_MINMAX));
-//			pkt.dts = av_rescale_q_rnd(pkt.dts, in_stream->time_base, out_stream->time_base, (AVRounding)(AV_ROUND_NEAR_INF | AV_ROUND_PASS_MINMAX));
-//			pkt.duration = av_rescale_q(pkt.duration, in_stream->time_base, out_stream->time_base);
-//			pkt.pos = -1;
-//			//Print to Screen
-//			if (pkt.stream_index == videoindex){
-//				printf("Receive %8d video frames from input URL\n", frame_index);
-//				frame_index++;
-//
-//#if USE_H264BSF 
-//				av_bitstream_filter_filter(h264bsfc, in_stream->codec, NULL, &pkt.data, &pkt.size, pkt.data, pkt.size, 0);
-//#endif
-//			}
-//			
-//			ret = av_write_frame(ofmt_ctx, &pkt);
-//			//ret = av_interleaved_write_frame(ofmt_ctx, &pkt);
-//
-//			if (ret < 0) {
-//				printf("Error muxing packet\n");
-//				break;
-//			}
-//			
-//#endif
-
+			av_free_packet(&pkt);
 		}
-		av_free_packet(&pkt);
-	}
-	
-#if USE_H264BSF
-	//av_bitstream_filter_close(h264bsfc);
-#endif
-	av_write_trailer(ofmt_ctx);
-	//faacEncClose(hEncoder);
-	fclose(aac_out);
-	fclose(p);
-	f_reader.Close();
-	mp4_writter_->Close();
-	//Write file trailer 
-	
-end:
-	avformat_close_input(&ifmt_ctx);
-	/* close output */
-	if (ofmt_ctx && !(ofmt->flags & AVFMT_NOFILE))
-		avio_close(ofmt_ctx->pb);
-	avformat_free_context(ofmt_ctx);
-	if (ret < 0 && ret != AVERROR_EOF) {
-		printf("Error occurred.\n");
-		return -1;
-	}
-	return 0;
-	}
 
+#if USE_H264BSF
+		//av_bitstream_filter_close(h264bsfc);
+#endif
+		av_write_trailer(ofmt_ctx);
+		//faacEncClose(hEncoder);
+		fclose(aac_out);
+		fclose(p);
+		f_reader.Close();
+		mp4_writter_->Close();
+		//Write file trailer 
+
+	end:
+		avformat_close_input(&ifmt_ctx);
+		/* close output */
+		if (ofmt_ctx && !(ofmt->flags & AVFMT_NOFILE))
+			avio_close(ofmt_ctx->pb);
+		avformat_free_context(ofmt_ctx);
+		if (ret < 0 && ret != AVERROR_EOF) {
+			printf("Error occurred.\n");
+			return -1;
+		}
+		return 0;
+	}
 
 
 void SendVideoData(char* buf, int bufLen, unsigned int timestamp, bool isKeyframe)
